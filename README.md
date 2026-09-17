@@ -78,16 +78,31 @@ attendues, et panneau de connexion/synchronisation Notion.
 | Chemin | Ce qu'il faut configurer |
 | --- | --- |
 | Slack `#inbound` | Créer une app Slack, activer les Event Subscriptions sur `message.channels` (ou `message.groups`), pointer l'URL d'événements vers `/api/ingest/slack`, renseigner `SLACK_SIGNING_SECRET`, inviter l'app dans le canal. |
+| Formulaires Webflow | Déclarer un webhook **Form submission** dans les réglages du site Webflow, pointé vers `/api/ingest/webflow?token=$INGEST_TOKEN`. Le nom du formulaire devient le lead magnet du lead. |
+| Make, Zapier, n8n | Appeler `POST /api/ingest/formulaire` avec l'identité, le contexte et, si votre scénario les connaît déjà, les dimensions qualifiées (`segment`, `relation`, `typeDemande`, `initiative`). Tout est facultatif : ce qui n'est pas fourni est déduit. |
 | E-mails de formulaire | Relayer chaque e-mail de notification vers `POST /api/ingest/email` (un automatisme type Make, Zapier, n8n ou une règle Gmail), avec `INGEST_TOKEN` en en-tête `Authorization: Bearer`. |
 | Import CSV | Aucune configuration : bouton « Importer » sur la page Leads, ou `POST /api/leads/import`. En-têtes reconnus en clair, valeurs acceptées en libellé ou en clé technique. |
 | Saisie manuelle | Aucune configuration : formulaire sur la page Leads, ou `POST /api/leads`. |
 
-Les leads issus de Slack et des e-mails passent par une classification
+Le scoring n'est jamais délégué à la source : une intégration transmet des
+faits (segment, relation, type de demande, initiative), le dashboard applique
+la règle et conserve son identifiant. Un scénario peut demander la valeur d'un
+lead avant de l'envoyer, via `POST /api/score`.
+
+Les leads issus de Slack, des formulaires et des e-mails passent par une classification
 automatique (segment, relation, type de demande, initiative, identité) fondée
 sur des règles de mots-clés et les paramètres UTM de l'URL d'origine. En
 dessous du seuil de confiance (60 %), le lead est marqué **« à vérifier »**
 plutôt que scoré sur une supposition : un humain tranche ensuite depuis la
 page Leads.
+
+## Mise en ligne et automatisation
+
+Brancher Slack, les formulaires Webflow et Make demande une URL publique :
+aucun webhook ne peut appeler `localhost`. La marche à suivre complète — déploiement
+Vercel + Supabase, création de l'application Slack, webhook Webflow, scénario
+Make avec les charges utiles exactes, et synchronisation Notion horaire — est
+dans [`docs/AUTOMATISATION.md`](docs/AUTOMATISATION.md).
 
 ## Synchronisation Notion
 
@@ -118,24 +133,36 @@ local est plus récent, la modification Notion est ignorée au `pull` — c'est 
 
 ## Référence de l'API HTTP
 
+Deux secrets distincts protègent l'API. Le **jeton d'ingestion**
+(`INGEST_TOKEN`, en `Authorization: Bearer` ou en `?token=`) couvre les portes
+d'entrée des leads. La **clé d'API** (`API_KEY`, en `Authorization: Bearer` ou
+en `?cle=`) couvre la lecture et l'écriture par des outils tiers ; l'interface
+du dashboard, elle, n'a rien à présenter. Tant qu'`API_KEY` n'est pas définie,
+ces routes restent ouvertes — pratique en local, à corriger dès la mise en
+ligne.
+
 | Méthode | Chemin | Rôle | Authentification |
 | --- | --- | --- | --- |
-| `GET` | `/api/leads` | Liste paginée des leads (filtres via query string : période, dates, segment, relation, type de demande, initiative, source, statut, éligibilité, « à vérifier », propriétaire, recherche `q`, tri, `limite`/`offset`). | Aucune |
-| `POST` | `/api/leads` | Crée un lead (`schemaLeadInput`). Déduplique par défaut (`dedupliquer: false` pour forcer la création). | Aucune |
-| `GET` | `/api/leads/{id}` | Détail d'un lead. | Aucune |
-| `PATCH` | `/api/leads/{id}` | Met à jour un lead (patch partiel). Re-score automatiquement si une dimension du moteur change. | Aucune |
-| `DELETE` | `/api/leads/{id}` | Suppression logique d'un lead. | Aucune |
-| `POST` | `/api/leads/import` | Import en masse, depuis `{ csv: "..." }`, `{ leads: [...] }` ou un corps `text/csv` brut. Chaque ligne invalide est rejetée sans interrompre les autres (limite : 5000 lignes). | Aucune |
-| `GET` | `/api/export` | Export CSV des leads (mêmes filtres que `/api/leads`), au format Excel FR (`;`, BOM UTF-8, virgule décimale). | Aucune |
-| `POST` | `/api/ingest/slack` | Webhook d'événements Slack (`event_callback` sur les messages du canal, plus la confirmation `url_verification`). | Signature Slack (`X-Slack-Signature` / `X-Slack-Request-Timestamp`, vérifiée avec `SLACK_SIGNING_SECRET`) |
-| `POST` | `/api/ingest/email` | Ingestion d'un e-mail de formulaire (`{ ... }`) ou d'un lot (`{ emails: [...] }`, 50 maximum). | Jeton porteur (`Authorization: Bearer $INGEST_TOKEN` ou `?token=`), via `INGEST_TOKEN` |
-| `POST` | `/api/score` | Simulateur : calcule le score d'une combinaison segment/relation/type de demande/initiative sans rien écrire en base. | Aucune |
-| `GET` | `/api/stats` | Statistiques agrégées d'une période (`?periode=2026-Q4`, sinon la période active). | Aucune |
-| `GET` | `/api/objectifs` | Objectif d'une période (`?periode=...`) ou liste de tous les objectifs enregistrés. | Aucune |
-| `PUT` | `/api/objectifs` | Crée ou met à jour l'objectif d'une période (cible de points, paliers, prime marginale). | Aucune |
-| `GET` | `/api/reglages` | Réglages applicatifs courants (période active, arbitrage newsletter × B2C, fenêtre de déduplication). | Aucune |
-| `PUT` | `/api/reglages` | Met à jour les réglages. Un changement d'arbitrage déclenche un recalcul de tous les leads déjà en base. | Aucune |
-| `GET` | `/api/notion/status` | État de la connexion Notion (configuré ou non, base/data source rattachées, dernier `pull`, leads en attente de `push`, historique des dernières synchronisations). | Aucune |
+| `GET` | `/api/leads` | Liste paginée des leads (filtres via query string : période, dates, segment, relation, type de demande, initiative, source, statut, éligibilité, « à vérifier », propriétaire, recherche `q`, tri, `limite`/`offset`). | Clé d'API |
+| `POST` | `/api/leads` | Crée un lead (`schemaLeadInput`). Déduplique par défaut (`dedupliquer: false` pour forcer la création). | Clé d'API |
+| `GET` | `/api/leads/{id}` | Détail d'un lead. | Clé d'API |
+| `PATCH` | `/api/leads/{id}` | Met à jour un lead (patch partiel). Re-score automatiquement si une dimension du moteur change. | Clé d'API |
+| `DELETE` | `/api/leads/{id}` | Suppression logique d'un lead. | Clé d'API |
+| `POST` | `/api/leads/import` | Import en masse, depuis `{ csv: "..." }`, `{ leads: [...] }` ou un corps `text/csv` brut. Chaque ligne invalide est rejetée sans interrompre les autres (limite : 5000 lignes). | Clé d'API |
+| `GET` | `/api/export` | Export CSV des leads (mêmes filtres que `/api/leads`), au format Excel FR (`;`, BOM UTF-8, virgule décimale). | Clé d'API |
+| `POST` | `/api/ingest/slack` | Webhook d'événements Slack (`event_callback` sur les messages du canal, plus la confirmation `url_verification`). | Signature Slack (`SLACK_SIGNING_SECRET`) |
+| `POST` | `/api/ingest/email` | Ingestion d'un e-mail de formulaire (`{ ... }`) ou d'un lot (`{ emails: [...] }`, 50 maximum). | Jeton d'ingestion |
+| `POST` | `/api/ingest/webflow` | Webhook de soumission de formulaire Webflow (formats v1 et v2). | Jeton d'ingestion, plus la signature Webflow si `WEBFLOW_WEBHOOK_SECRET` est défini |
+| `POST` | `/api/ingest/formulaire` | Ingestion générique appelée par Make, Zapier ou n8n : identité, contexte, et dimensions déjà qualifiées ou non. Un objet ou un lot (`{ leads: [...] }`, 100 maximum). | Jeton d'ingestion |
+| `GET` `POST` | `/api/cron/{tache}` | Tâches planifiées : `notion-sync` (synchronisation bidirectionnelle) et `resume-periode` (état du trimestre en JSON). | `Authorization: Bearer $CRON_SECRET` |
+| `GET` | `/api/health` | Sonde de santé : pilote de base actif, base joignable, intégrations configurées. Ne divulgue aucune donnée de lead. | Publique |
+| `POST` | `/api/score` | Simulateur : calcule le score d'une combinaison segment/relation/type de demande/initiative sans rien écrire en base. | Clé d'API |
+| `GET` | `/api/stats` | Statistiques agrégées d'une période (`?periode=2026-Q4`, sinon la période active). | Clé d'API |
+| `GET` | `/api/objectifs` | Objectif d'une période (`?periode=...`) ou liste de tous les objectifs enregistrés. | Clé d'API |
+| `PUT` | `/api/objectifs` | Crée ou met à jour l'objectif d'une période (cible de points, paliers, prime marginale). | Clé d'API |
+| `GET` | `/api/reglages` | Réglages applicatifs courants (période active, arbitrage newsletter × B2C, fenêtre de déduplication). | Clé d'API |
+| `PUT` | `/api/reglages` | Met à jour les réglages. Un changement d'arbitrage déclenche un recalcul de tous les leads déjà en base. | Clé d'API |
+| `GET` | `/api/notion/status` | État de la connexion Notion (configuré ou non, base/data source rattachées, dernier `pull`, leads en attente de `push`, historique des dernières synchronisations). | Clé d'API |
 | `POST` | `/api/notion/setup` | Rattache ou crée la base Notion (`{ databaseId? , parentPageId?, titre? }`). | Nécessite `NOTION_TOKEN` |
 | `POST` | `/api/notion/sync` | Lance une synchronisation (`?direction=pull\|push`, sinon bidirectionnelle). | Nécessite `NOTION_TOKEN` |
 
