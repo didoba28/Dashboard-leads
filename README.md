@@ -101,7 +101,7 @@ page Leads.
 Brancher Slack, les formulaires Webflow et Make demande une URL publique :
 aucun webhook ne peut appeler `localhost`. La marche à suivre complète — déploiement
 Vercel + Supabase, création de l'application Slack, webhook Webflow, scénario
-Make avec les charges utiles exactes, et synchronisation Notion horaire — est
+Make avec les charges utiles exactes, et synchronisation Notion quotidienne — est
 dans [`docs/AUTOMATISATION.md`](docs/AUTOMATISATION.md).
 
 ## Synchronisation Notion

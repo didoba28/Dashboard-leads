@@ -130,19 +130,22 @@ export const schemaWebflow = z
 // --- Reconnaissance tolérante des clés de `data` -------------------------------
 
 const CLES_EMAIL = ['email', 'e_mail', 'mail', 'adresse_email', 'courriel'];
-const CLES_NOM = ['nom', 'name', 'nom_complet', 'votre_nom'];
+const CLES_NOM = ['nom', 'name', 'nom_complet', 'nom_et_prenom', 'votre_nom'];
 const CLES_PRENOM = ['prenom', 'first_name'];
 const CLES_TELEPHONE = ['telephone', 'tel', 'phone', 'mobile', 'portable'];
 const CLES_SOCIETE = [
   'societe', 'entreprise', 'organisme', 'organisation', 'collectivite', 'structure', 'company', 'mairie',
+  'commune',
 ];
 const CLES_FONCTION = ['fonction', 'poste', 'role', 'job_title'];
 const CLES_VILLE = ['ville', 'commune', 'city', 'localite'];
-const CLES_MESSAGE = ['message', 'demande', 'commentaire', 'precisions', 'besoin'];
+const CLES_MESSAGE = [
+  'message', 'demande', 'commentaire', 'precisions', 'precisions_sur_votre_projet_optionnel', 'besoin',
+];
 
 /** Clé de champ Webflow → forme comparable aux listes ci-dessus (`Adresse e-mail` → `adresse_e_mail`). */
 function cleComparable(cle: string): string {
-  return normaliserTexte(cle).replace(/\s+/g, '_');
+  return normaliserTexte(cle).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 /** Renvoie la première valeur de `data` dont la clé (normalisée) correspond à `cles`. */

@@ -11,7 +11,7 @@ Slack #inbound  ─┐
 Formulaires Webflow ─┼──►  /api/ingest/*  ──►  moteur de règles  ──►  base
 E-mails via Make ─┘                                                    │
                                                                        ▼
-                                          tâche planifiée horaire ──► Notion
+                                          tâche planifiée quotidienne ──► Notion
 ```
 
 Trois portes d'entrée, un seul moteur de scoring, une base, et Notion tenu à
@@ -99,10 +99,9 @@ Webflow sait appeler une URL à chaque soumission de formulaire.
 3. URL : `https://VOTRE-URL/api/ingest/webflow?token=VOTRE_INGEST_TOKEN`
 
 Le jeton passe par l'URL parce que Webflow ne permet pas d'ajouter un en-tête.
-Traitez donc cette URL comme un secret. Si vous créez le webhook par l'API
-Webflow plutôt que par l'interface, vous obtenez en plus un secret de
-signature : placez-le dans `WEBFLOW_WEBHOOK_SECRET` et chaque requête sera
-authentifiée cryptographiquement.
+Traitez donc cette URL comme un secret. Si Webflow fournit un secret de signature
+pour ce webhook, placez-le dans `WEBFLOW_WEBHOOK_SECRET` et chaque requête sera
+également authentifiée cryptographiquement.
 
 Le nom du formulaire Webflow devient le **lead magnet** du lead. Nommez donc
 vos formulaires pour ce qu'ils sont — « Téléchargement catalogue 2026 »,
@@ -200,14 +199,19 @@ dans la réponse (`"doublon": true`).
 
 ## Étape 5 — Notion en continu
 
-Le fichier `vercel.json` déclare une synchronisation **toutes les heures**.
+Le fichier `vercel.json` déclare une synchronisation **chaque jour à 05:00 UTC**.
 Elle s'active dès que `CRON_SECRET` est défini sur le projet — Vercel transmet
 le secret automatiquement, vous n'avez rien à configurer de plus.
+
+Cette fréquence fonctionne aussi sur Vercel Hobby, qui n'accepte pas de tâche
+plus fréquente qu'une fois par jour. Pour une synchronisation horaire, utilisez
+Vercel Pro ou programmez un appel à `/api/cron/notion-sync` depuis Make avec
+`Authorization: Bearer VOTRE_CRON_SECRET`.
 
 Prérequis : `NOTION_TOKEN` renseigné et une base connectée (page
 **Intégrations** du dashboard, ou `npm run notion:setup`).
 
-Pour changer la fréquence, modifiez `vercel.json` :
+Sur Vercel Pro, pour passer à une fréquence de 15 minutes, modifiez `vercel.json` :
 
 ```json
 { "crons": [ { "path": "/api/cron/notion-sync", "schedule": "*/15 * * * *" } ] }
@@ -259,7 +263,7 @@ au navigateur.
    une adresse e-mail. Il doit apparaître dans **Leads** en quelques secondes.
 3. Soumettez un formulaire de test sur le site Webflow. Même vérification.
 4. Déclenchez le scénario Make à la main sur un e-mail réel.
-5. Attendez l'heure ronde, puis ouvrez la base Notion : les leads doivent y
+5. Après la tâche quotidienne (ou un appel manuel à la route de synchronisation), ouvrez la base Notion : les leads doivent y
    être. La page **Intégrations** affiche le journal des synchronisations, avec
    les erreurs éventuelles.
 
