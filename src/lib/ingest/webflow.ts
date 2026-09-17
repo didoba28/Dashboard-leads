@@ -26,11 +26,9 @@ export interface ParamsVerificationSignatureWebflow {
  * Vérifie la signature d'un webhook Webflow (HMAC-SHA256 hex de `${timestamp}:${corps}`).
  * Renvoie `null` si la requête est valide, sinon un message d'erreur explicite.
  *
- * Différence volontaire avec Slack (`verifierSignatureSlack`) : si `secret` est
- * `undefined`, la signature n'est PAS exigée. Les webhooks créés depuis
- * l'interface Webflow (plutôt que via l'API avec un secret explicite) n'ont pas
- * de secret configurable — c'est alors le jeton d'ingestion (`verifierJetonIngestion`,
- * passé en `?token=`) qui protège l'endpoint.
+ * Si `secret` est absent, la vérification est ignorée pour préserver le
+ * développement local. La route bloque ce cas en production : la signature
+ * et le jeton d'ingestion y sont tous deux requis.
  */
 export function verifierSignatureWebflow(params: ParamsVerificationSignatureWebflow): string | null {
   const { corpsBrut, timestamp, signature, secret } = params;

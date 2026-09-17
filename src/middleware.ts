@@ -1,51 +1,18 @@
-/**
- * Protection des routes d'API par clé.
- *
- * Portée exacte, à ne pas surinterpréter : cette clé empêche un outil tiers
- * d'interroger l'API sans autorisation. Elle **n'authentifie pas les
- * personnes** — l'interface du dashboard reste accessible à qui a l'URL tant
- * qu'une vraie page de connexion n'est pas ajoutée.
- *
- * Deux façons d'être autorisé :
- * - présenter la clé (`Authorization: Bearer …` ou `?cle=…`) : c'est le chemin
- *   des intégrations (Make, Sheets, un script) ;
- * - être une requête émise par l'interface elle-même. Les navigateurs
- *   renseignent `Sec-Fetch-Site: same-origin`, en-tête interdit à JavaScript :
- *   un autre site ne peut pas le falsifier.
- *
- * Sans `API_KEY` définie, rien n'est exigé — c'est le confort du développement
- * local, et c'est documenté comme tel.
- *
- * Les routes d'ingestion et les tâches planifiées ont leurs propres secrets
- * (`INGEST_TOKEN`, `CRON_SECRET`) et sont donc exclues d'ici.
- */
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { authConfiguree, emailAutorise } from '@/lib/auth/config';
 
-const EXCLUES = ['/api/ingest', '/api/cron', '/api/health'];
+const ROUTES_EXTERNES = ['/api/ingest/', '/api/cron/'];
+const ROUTES_PUBLIQUES = ['/connexion', '/auth/callback', '/auth/send-link'];
 
-export function middleware(request: NextRequest) {
-  const chemin = request.nextUrl.pathname;
-  if (EXCLUES.some((prefixe) => chemin.startsWith(prefixe))) return NextResponse.next();
-
-  const attendue = process.env['API_KEY'];
-  if (!attendue) return NextResponse.next();
-
-  const entete = request.headers.get('authorization') ?? '';
-  const fournie = entete.startsWith('Bearer ')
-    ? entete.slice(7)
-    : request.nextUrl.searchParams.get('cle');
-  if (fournie && comparaisonConstante(fournie, attendue)) return NextResponse.next();
-
-  const provenance = request.headers.get('sec-fetch-site');
-  if (provenance === 'same-origin' || provenance === 'none') return NextResponse.next();
-
-  return NextResponse.json(
-    { erreur: 'Clé d’API requise : ajoutez l’en-tête `Authorization: Bearer <API_KEY>`.' },
-    { status: 401 },
-  );
+function reponseErreurApi(message: string, statut: number) {
+  return NextResponse.json({ erreur: message }, { status: statut });
 }
 
-/** Comparaison à temps constant, pour ne pas fuiter la clé par timing. */
+function cheminRedirection(request: NextRequest, chemin: string) {
+  return NextResponse.redirect(new URL(chemin, request.url));
+}
+
 function comparaisonConstante(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -53,6 +20,73 @@ function comparaisonConstante(a: string, b: string): boolean {
   return diff === 0;
 }
 
+export async function middleware(request: NextRequest) {
+  const chemin = request.nextUrl.pathname;
+  const estApi = chemin.startsWith('/api/');
+  if (chemin === '/api/health' || ROUTES_EXTERNES.some((prefixe) => chemin.startsWith(prefixe))) {
+    return NextResponse.next();
+  }
+
+  // La clé d'API sert aux scripts. Une requête de navigateur doit prouver son identité.
+  if (estApi) {
+    const attendue = process.env.API_KEY;
+    const entete = request.headers.get('authorization') ?? '';
+    if (attendue && entete.startsWith('Bearer ') && comparaisonConstante(entete.slice(7), attendue)) {
+      return NextResponse.next();
+    }
+  }
+
+  const estPublic = ROUTES_PUBLIQUES.some((route) => chemin === route || chemin.startsWith(`${route}/`));
+  if (!authConfiguree()) {
+    // Confort local uniquement. Un déploiement incomplet n'expose aucune donnée.
+    if (process.env.NODE_ENV !== 'production') return NextResponse.next();
+    return estApi
+      ? reponseErreurApi('Authentification non configurée.', 503)
+      : new NextResponse('Authentification non configurée.', { status: 503 });
+  }
+
+  let reponse = NextResponse.next({ request });
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: (elements) => {
+          for (const { name, value } of elements) request.cookies.set(name, value);
+          reponse = NextResponse.next({ request });
+          for (const { name, value, options } of elements) reponse.cookies.set(name, value, options);
+        },
+      },
+    },
+  );
+
+  const { data, error } = await supabase.auth.getClaims();
+  const identifie = !error && emailAutorise(data?.claims?.email);
+  const facteurVerifie = identifie && data?.claims?.aal === 'aal2';
+
+  let resultat: NextResponse;
+  if (estPublic) {
+    resultat = chemin === '/connexion' && facteurVerifie ? cheminRedirection(request, '/') : reponse;
+  } else if (!identifie) {
+    resultat = estApi ? reponseErreurApi('Connexion requise.', 401) : cheminRedirection(request, '/connexion');
+  } else if (!facteurVerifie && chemin !== '/mfa') {
+    resultat = estApi ? reponseErreurApi('Vérification à deux facteurs requise.', 403) : cheminRedirection(request, '/mfa');
+  } else if (estApi && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    const origine = request.headers.get('origin');
+    resultat = origine === request.nextUrl.origin
+      ? reponse
+      : reponseErreurApi('Origine de la requête non autorisée.', 403);
+  } else {
+    resultat = reponse;
+  }
+
+  // Conserver les cookies rafraîchis même sur une redirection.
+  for (const cookie of reponse.cookies.getAll()) resultat.cookies.set(cookie);
+  resultat.headers.set('Cache-Control', 'private, no-store');
+  return resultat;
+}
+
 export const config = {
-  matcher: '/api/:path*',
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 };

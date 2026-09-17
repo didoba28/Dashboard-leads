@@ -1,12 +1,8 @@
 -- Schéma PostgreSQL du dashboard leads — à coller tel quel dans l'éditeur SQL
 -- de Supabase (ou à exécuter via `psql`).
 --
--- Sécurité : cette base n'est jamais interrogée depuis le navigateur. Seul le
--- serveur Next.js s'y connecte (via `DATABASE_URL`, éventuellement avec la clé
--- `service_role` si vous passez par le pooler Supabase) ; RLS peut donc rester
--- désactivé sur ces tables tant qu'aucun accès client (anon/authenticated)
--- n'est ajouté. Si un jour un accès direct depuis le navigateur est introduit,
--- activez RLS et écrivez des politiques avant d'exposer la clé `anon`.
+-- Sécurité : les tables sont fermées à l'API publique par RLS et retrait des
+-- droits anon/authenticated. Seul le serveur Next.js utilise DATABASE_URL.
 --
 -- Ce fichier est le pendant PostgreSQL des migrations appliquées automatiquement
 -- par l'application (voir src/lib/db/postgres.ts) : mêmes tables, mêmes index.
@@ -92,6 +88,21 @@ CREATE TABLE IF NOT EXISTS journal_sync (
   duree_ms  INTEGER NOT NULL DEFAULT 0,
   succes    BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+ALTER TABLE migrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE objectifs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reglages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE journal_sync ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL PRIVILEGES ON TABLE migrations, leads, objectifs, reglages, journal_sync FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL PRIVILEGES ON TABLE migrations, leads, objectifs, reglages, journal_sync FROM authenticated;
+  END IF;
+END $$;
 
 -- Marque la migration comme déjà appliquée : au premier démarrage, l'application
 -- constatera qu'elle existe déjà dans `migrations` et ne rejouera pas son SQL.

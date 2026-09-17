@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
+    if (process.env.NODE_ENV === 'production' && !process.env.WEBFLOW_WEBHOOK_SECRET) {
+      return erreur('Signature Webflow non configurée.', 503);
+    }
     // Le corps BRUT est indispensable à la vérification de signature Webflow.
     const corpsBrut = await request.text();
     const erreurSignature = verifierSignatureWebflow({

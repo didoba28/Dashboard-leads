@@ -45,6 +45,10 @@ Le détail, y compris la reprise des données existantes, est dans
 | Variable | Valeur |
 | --- | --- |
 | `DATABASE_URL` | la chaîne Supabase de l'étape 1.1 |
+| `SUPABASE_DB_CA_CERT` | le certificat CA PEM de la base si nécessaire à la validation TLS |
+| `NEXT_PUBLIC_SUPABASE_URL` | l'URL du projet Supabase Auth |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | la clé publiable Supabase Auth |
+| `DASHBOARD_ALLOWED_EMAILS` | les adresses e-mail exactes autorisées, séparées par des virgules |
 | `INGEST_TOKEN` | une chaîne aléatoire que vous générez |
 | `CRON_SECRET` | une autre chaîne aléatoire |
 | `API_KEY` | une troisième chaîne aléatoire |
@@ -62,9 +66,8 @@ node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 curl https://VOTRE-URL/api/health
 ```
 
-Vous devez lire `"statut":"ok"`, `"pilote":"postgres"`, et les intégrations
-déjà configurées à `true`. Cette route est publique et ne divulgue aucune
-donnée de lead — elle est faite pour être surveillée par un service d'uptime.
+Vous devez lire `"statut":"ok"`. Cette route publique ne révèle que l'état
+de la base et peut être surveillée par un service d'uptime.
 
 ## Étape 2 — Slack `#inbound`
 
@@ -99,9 +102,11 @@ Webflow sait appeler une URL à chaque soumission de formulaire.
 3. URL : `https://VOTRE-URL/api/ingest/webflow?token=VOTRE_INGEST_TOKEN`
 
 Le jeton passe par l'URL parce que Webflow ne permet pas d'ajouter un en-tête.
-Traitez donc cette URL comme un secret. Si Webflow fournit un secret de signature
-pour ce webhook, placez-le dans `WEBFLOW_WEBHOOK_SECRET` et chaque requête sera
-également authentifiée cryptographiquement.
+Traitez donc cette URL comme un secret. Récupérez la clé de signature de ce
+webhook dans Webflow et placez-la dans `WEBFLOW_WEBHOOK_SECRET` : le serveur
+vérifie obligatoirement la signature en production. Les webhooks créés avec
+un jeton de site récent disposent de leur propre clé ; ceux d'une app OAuth
+utilisent le secret client de l'app.
 
 Le nom du formulaire Webflow devient le **lead magnet** du lead. Nommez donc
 vos formulaires pour ce qu'ils sont — « Téléchargement catalogue 2026 »,
@@ -229,15 +234,12 @@ un scénario Make hebdomadaire pour recevoir le récapitulatif dans Slack.
 
 ## Étape 6 — Fermer l'API
 
-Dès que `API_KEY` est définie, les routes de lecture et d'écriture exigent
-`Authorization: Bearer VOTRE_API_KEY`. L'interface du dashboard continue de
-fonctionner sans rien présenter : les navigateurs identifient leurs propres
-requêtes par un en-tête que les autres sites ne peuvent pas falsifier.
-
-**Ce que cela protège, et ce que cela ne protège pas.** La clé empêche un outil
-tiers d'interroger votre API. Elle n'authentifie pas les personnes : qui a
-l'URL du dashboard voit toujours les leads. Une vraie page de connexion reste à
-ajouter avant d'exposer l'adresse largement.
+Dès que `API_KEY` est définie, les scripts tiers peuvent accéder aux routes de
+lecture et d'écriture avec `Authorization: Bearer VOTRE_API_KEY`. L'interface
+utilise une session Supabase réservée aux adresses autorisées et vérifiée par
+un code TOTP. Une configuration Auth incomplète bloque le déploiement en
+production au lieu d'exposer les données. Le guide complet figure dans
+[`SUPABASE.md`](SUPABASE.md).
 
 Les routes d'ingestion ne sont pas concernées — elles ont leur propre jeton — ni
 `/api/health`, volontairement publique.
@@ -248,13 +250,15 @@ Les routes d'ingestion ne sont pas concernées — elles ont leur propre jeton �
 | --- | --- | --- |
 | `INGEST_TOKEN` | `/api/ingest/email`, `/webflow`, `/formulaire` | Webflow, Make |
 | `SLACK_SIGNING_SECRET` | signature des requêtes Slack | Slack (automatique) |
-| `WEBFLOW_WEBHOOK_SECRET` | signature Webflow, facultatif | Webflow (automatique) |
+| `WEBFLOW_WEBHOOK_SECRET` | signature Webflow, obligatoire en production | Webflow (automatique) |
 | `API_KEY` | lecture et écriture de l'API | outils tiers |
 | `CRON_SECRET` | `/api/cron/*` | l'ordonnanceur |
 | `DATABASE_URL` | la base | l'application seule |
 
-Aucun de ces secrets ne doit être préfixé `NEXT_PUBLIC_` : ils seraient envoyés
-au navigateur.
+Les secrets (`DATABASE_URL`, `SUPABASE_DB_CA_CERT`, `DASHBOARD_ALLOWED_EMAILS`,
+`API_KEY`, `INGEST_TOKEN`, `CRON_SECRET` et signatures) restent côté serveur.
+Seules `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+sont publiques par conception.
 
 ## Vérifier que la chaîne fonctionne
 

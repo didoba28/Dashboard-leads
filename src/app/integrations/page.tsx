@@ -15,6 +15,7 @@ export default async function PageIntegrations() {
   const base = process.env.APP_URL ?? `${protocole}://${hote}`;
   const slackConfigure = Boolean(process.env.SLACK_SIGNING_SECRET);
   const ingestionConfiguree = Boolean(process.env.INGEST_TOKEN);
+  const webflowConfigure = ingestionConfiguree && Boolean(process.env.WEBFLOW_WEBHOOK_SECRET);
   const cronConfigure = Boolean(process.env.CRON_SECRET);
 
   return (
@@ -63,8 +64,8 @@ export default async function PageIntegrations() {
           titre="Formulaires Webflow"
           sousTitre="Chaque soumission crée un lead sans passer par un e-mail"
           action={
-            <Badge ton={ingestionConfiguree ? 'bon' : 'attention'}>
-              {ingestionConfiguree ? 'Jeton actif' : 'INGEST_TOKEN manquant'}
+            <Badge ton={webflowConfigure ? 'bon' : 'attention'}>
+              {webflowConfigure ? 'Signature active' : 'Signature à configurer'}
             </Badge>
           }
         />
@@ -72,6 +73,7 @@ export default async function PageIntegrations() {
           <p>
             Créez un webhook « Form submission » sur le site Webflow et renseignez cette URL.
             Remplacez le texte du jeton par la valeur de <code className="rounded bg-surface-2 px-1">INGEST_TOKEN</code>.
+            Ajoutez sa clé de signature dans <code className="rounded bg-surface-2 px-1">WEBFLOW_WEBHOOK_SECRET</code>.
           </p>
           <BlocCode label="URL du webhook" contenu={`${base}/api/ingest/webflow?token=VOTRE_INGEST_TOKEN`} />
           <p>
@@ -168,16 +170,20 @@ Authorization: Bearer VOTRE_INGEST_TOKEN
         </Carte>
 
         <Carte>
-          <EnteteCarte titre="Variables d’environnement" sousTitre="À renseigner dans .env.local" />
+          <EnteteCarte titre="Variables d’environnement" sousTitre="À renseigner dans .env.local ou dans Vercel" />
           <div className="px-5 pb-5">
             <BlocCode
               contenu={`NOTION_TOKEN=ntn_…
 NOTION_DATABASE_ID=…        # ou NOTION_PARENT_PAGE_ID pour créer la base
 SLACK_SIGNING_SECRET=…
+WEBFLOW_WEBHOOK_SECRET=…
 INGEST_TOKEN=…              # jeton de votre choix
 CRON_SECRET=…               # jeton distinct pour la synchronisation
 API_KEY=…                   # accès des outils tiers à l'API
 DATABASE_URL=…              # base PostgreSQL/Supabase en production
+NEXT_PUBLIC_SUPABASE_URL=…
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=…
+DASHBOARD_ALLOWED_EMAILS=… # adresses exactes autorisées
 APP_URL=${base}`}
             />
           </div>

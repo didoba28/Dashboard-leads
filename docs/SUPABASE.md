@@ -42,21 +42,44 @@ avec SQLite. Rien d'autre ne change : mêmes écrans, mêmes routes, mêmes règ
 5. Redémarrez l'application. Vérifiez sur la page **Intégrations** ou via
    `GET /api/reglages` que tout répond normalement.
 
-Le chiffrement TLS est activé automatiquement quand l'URL contient
-`supabase.co` ou `sslmode=require` — vous n'avez rien à configurer.
+Le chiffrement TLS est activé automatiquement pour Supabase et le certificat
+du serveur est vérifié. Si votre projet utilise une autorité de certification
+propre à Supabase, copiez son certificat PEM depuis les réglages SSL de la base
+dans `SUPABASE_DB_CA_CERT` (sauts de ligne représentés par `\n`). Ne
+désactivez pas la vérification TLS pour résoudre une erreur de certificat.
+
+## Authentification des personnes
+
+Le projet Supabase sert également à l'authentification du dashboard :
+
+1. Activez l'authentification par e-mail et désactivez l'inscription publique
+   dans **Authentication → Providers → Email**. Invitez ou créez chaque compte
+   autorisé dans **Authentication → Users**.
+2. Renseignez l'URL du dashboard dans la configuration des URL Auth de Supabase,
+   avec `https://VOTRE-DOMAINE/auth/callback` comme URL de redirection admise.
+3. Définissez `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   et `DASHBOARD_ALLOWED_EMAILS` (adresses exactes séparées par des virgules).
+4. Chaque personne reçoit un lien e-mail et doit configurer puis saisir un
+   code TOTP. L'accès aux pages et aux API attend une session de niveau `aal2`.
+
+La clé publiable est visible dans le navigateur par conception. La migration
+`002_verrouillage_rls` active RLS et retire les droits `anon` et
+`authenticated` sur toutes les tables du dashboard. Aucune politique publique
+n'est créée ; le serveur y accède avec `DATABASE_URL`.
 
 ## Sécurité
 
-La base n'est **jamais** interrogée depuis le navigateur : seules les routes
-serveur Next.js s'y connectent. Tant que c'est le cas, vous pouvez laisser RLS
-désactivé sur ces tables et n'exposer que `DATABASE_URL` côté serveur.
+La base métier n'est **jamais** interrogée depuis le navigateur : seules les
+routes serveur Next.js s'y connectent. RLS reste activé pour fermer l'API Data
+de Supabase aux clés publiques, même si celles-ci sont présentes dans le client
+pour Supabase Auth.
 
 Deux règles à ne pas enfreindre :
 
 - `DATABASE_URL` ne doit jamais être préfixée par `NEXT_PUBLIC_`, sinon elle
   serait envoyée au navigateur.
-- Si un jour un accès direct depuis le client est ajouté (clé `anon`), activez
-  RLS et écrivez les politiques **avant** d'exposer quoi que ce soit.
+- Si un jour un accès direct à ces tables depuis le client est ajouté, créez
+  des droits et des politiques RLS strictes avant de l'activer.
 
 ## Migrer des données existantes
 

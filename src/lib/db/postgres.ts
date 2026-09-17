@@ -100,6 +100,25 @@ const MIGRATIONS_POSTGRES: Migration[] = [
       );
     `,
   },
+  {
+    nom: '002_verrouillage_rls',
+    sql: `
+      ALTER TABLE migrations ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE objectifs ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE reglages ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE journal_sync ENABLE ROW LEVEL SECURITY;
+
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+          REVOKE ALL PRIVILEGES ON TABLE migrations, leads, objectifs, reglages, journal_sync FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+          REVOKE ALL PRIVILEGES ON TABLE migrations, leads, objectifs, reglages, journal_sync FROM authenticated;
+        END IF;
+      END $$;
+    `,
+  },
 ];
 
 /** Traduit les marqueurs positionnels `?` (convention commune, voir types.ts) en `$1, $2, …`. */
@@ -162,15 +181,18 @@ class PilotePostgres implements PiloteDonnees {
   }
 }
 
-/** SSL requis pour Supabase (pooler compris) et toute URL l'exigeant explicitement. */
-function sslRequis(urlConnexion: string): boolean {
-  return urlConnexion.includes('supabase.co') || /sslmode=require/i.test(urlConnexion);
-}
-
 export async function creerPilotePostgres(urlConnexion: string): Promise<PiloteDonnees> {
+  const url = new URL(urlConnexion);
+  const sslMode = url.searchParams.get('sslmode');
+  // node-postgres peut écraser l'objet `ssl` si sslmode reste dans l'URI.
+  url.searchParams.delete('sslmode');
+  const supabase = url.hostname === 'supabase.co' || url.hostname.endsWith('.supabase.co');
+  const tls = supabase || sslMode === 'require' || sslMode === 'verify-full' || sslMode === 'verify-ca';
+  const ca = process.env.SUPABASE_DB_CA_CERT?.replace(/\\n/g, '\n');
   const pool = new Pool({
-    connectionString: urlConnexion,
-    ssl: sslRequis(urlConnexion) ? { rejectUnauthorized: false } : undefined,
+    connectionString: url.toString(),
+    ssl: tls ? { rejectUnauthorized: true, ...(ca ? { ca } : {}) } : undefined,
+    max: 5,
   });
   const pilote = new PilotePostgres(pool, pool);
   await appliquerMigrations(pilote, MIGRATIONS_POSTGRES);

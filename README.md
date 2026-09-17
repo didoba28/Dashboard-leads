@@ -78,7 +78,7 @@ attendues, et panneau de connexion/synchronisation Notion.
 | Chemin | Ce qu'il faut configurer |
 | --- | --- |
 | Slack `#inbound` | Créer une app Slack, activer les Event Subscriptions sur `message.channels` (ou `message.groups`), pointer l'URL d'événements vers `/api/ingest/slack`, renseigner `SLACK_SIGNING_SECRET`, inviter l'app dans le canal. |
-| Formulaires Webflow | Déclarer un webhook **Form submission** dans les réglages du site Webflow, pointé vers `/api/ingest/webflow?token=$INGEST_TOKEN`. Le nom du formulaire devient le lead magnet du lead. |
+| Formulaires Webflow | Déclarer un webhook **Form submission** pointé vers `/api/ingest/webflow?token=$INGEST_TOKEN` et configurer son secret de signature dans `WEBFLOW_WEBHOOK_SECRET`. Le nom du formulaire devient le lead magnet du lead. |
 | Make, Zapier, n8n | Appeler `POST /api/ingest/formulaire` avec l'identité, le contexte et, si votre scénario les connaît déjà, les dimensions qualifiées (`segment`, `relation`, `typeDemande`, `initiative`). Tout est facultatif : ce qui n'est pas fourni est déduit. |
 | E-mails de formulaire | Relayer chaque e-mail de notification vers `POST /api/ingest/email` (un automatisme type Make, Zapier, n8n ou une règle Gmail), avec `INGEST_TOKEN` en en-tête `Authorization: Bearer`. |
 | Import CSV | Aucune configuration : bouton « Importer » sur la page Leads, ou `POST /api/leads/import`. En-têtes reconnus en clair, valeurs acceptées en libellé ou en clé technique. |
@@ -135,11 +135,10 @@ local est plus récent, la modification Notion est ignorée au `pull` — c'est 
 
 Deux secrets distincts protègent l'API. Le **jeton d'ingestion**
 (`INGEST_TOKEN`, en `Authorization: Bearer` ou en `?token=`) couvre les portes
-d'entrée des leads. La **clé d'API** (`API_KEY`, en `Authorization: Bearer` ou
-en `?cle=`) couvre la lecture et l'écriture par des outils tiers ; l'interface
-du dashboard, elle, n'a rien à présenter. Tant qu'`API_KEY` n'est pas définie,
-ces routes restent ouvertes — pratique en local, à corriger dès la mise en
-ligne.
+d'entrée des leads. La **clé d'API** (`API_KEY`, en `Authorization: Bearer`)
+couvre la lecture et l'écriture par des outils tiers. Les personnes passent
+par Supabase Auth : adresse autorisée, lien e-mail puis code TOTP. En
+production, une configuration Auth incomplète ferme les pages et l'API.
 
 | Méthode | Chemin | Rôle | Authentification |
 | --- | --- | --- | --- |
@@ -152,10 +151,10 @@ ligne.
 | `GET` | `/api/export` | Export CSV des leads (mêmes filtres que `/api/leads`), au format Excel FR (`;`, BOM UTF-8, virgule décimale). | Clé d'API |
 | `POST` | `/api/ingest/slack` | Webhook d'événements Slack (`event_callback` sur les messages du canal, plus la confirmation `url_verification`). | Signature Slack (`SLACK_SIGNING_SECRET`) |
 | `POST` | `/api/ingest/email` | Ingestion d'un e-mail de formulaire (`{ ... }`) ou d'un lot (`{ emails: [...] }`, 50 maximum). | Jeton d'ingestion |
-| `POST` | `/api/ingest/webflow` | Webhook de soumission de formulaire Webflow (formats v1 et v2). | Jeton d'ingestion, plus la signature Webflow si `WEBFLOW_WEBHOOK_SECRET` est défini |
+| `POST` | `/api/ingest/webflow` | Webhook de soumission de formulaire Webflow (formats v1 et v2). | Jeton d'ingestion et signature Webflow obligatoire en production |
 | `POST` | `/api/ingest/formulaire` | Ingestion générique appelée par Make, Zapier ou n8n : identité, contexte, et dimensions déjà qualifiées ou non. Un objet ou un lot (`{ leads: [...] }`, 100 maximum). | Jeton d'ingestion |
 | `GET` `POST` | `/api/cron/{tache}` | Tâches planifiées : `notion-sync` (synchronisation bidirectionnelle) et `resume-periode` (état du trimestre en JSON). | `Authorization: Bearer $CRON_SECRET` |
-| `GET` | `/api/health` | Sonde de santé : pilote de base actif, base joignable, intégrations configurées. Ne divulgue aucune donnée de lead. | Publique |
+| `GET` | `/api/health` | Sonde de santé : état minimal de la base. | Publique |
 | `POST` | `/api/score` | Simulateur : calcule le score d'une combinaison segment/relation/type de demande/initiative sans rien écrire en base. | Clé d'API |
 | `GET` | `/api/stats` | Statistiques agrégées d'une période (`?periode=2026-Q4`, sinon la période active). | Clé d'API |
 | `GET` | `/api/objectifs` | Objectif d'une période (`?periode=...`) ou liste de tous les objectifs enregistrés. | Clé d'API |
@@ -263,6 +262,11 @@ Voir `.env.example` pour le détail complet, commenté. Résumé :
 | Variable | Rôle | Obligatoire |
 | --- | --- | --- |
 | `DATABASE_PATH` | Chemin du fichier SQLite. | Non — par défaut `data/leads.db` |
+| `DATABASE_URL` | Connexion PostgreSQL/Supabase côté serveur. | Oui sur Vercel |
+| `SUPABASE_DB_CA_CERT` | Certificat CA de la base pour valider TLS. | Selon le certificat utilisé par Supabase |
+| `NEXT_PUBLIC_SUPABASE_URL` | URL publique de Supabase Auth. | Oui en production |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Clé publiable de Supabase Auth. | Oui en production |
+| `DASHBOARD_ALLOWED_EMAILS` | Adresses précises autorisées, côté serveur. | Oui en production |
 | `NOTION_TOKEN` | Jeton de l'intégration Notion interne. | Non — sans elle, Notion reste désactivé |
 | `NOTION_DATABASE_ID` | Base Notion à rattacher. | Non — sinon `NOTION_PARENT_PAGE_ID` ou la configuration via l'UI |
 | `NOTION_PARENT_PAGE_ID` | Page parente sous laquelle créer la base Notion. | Non |
