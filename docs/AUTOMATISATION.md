@@ -99,12 +99,11 @@ Webflow sait appeler une URL à chaque soumission de formulaire.
 1. Dans les réglages du site Webflow : **Site settings → Integrations →
    Webhooks → Add Webhook**.
 2. Trigger type : **Form submission**.
-3. URL : `https://VOTRE-URL/api/ingest/webflow?token=VOTRE_INGEST_TOKEN`
+3. URL : `https://VOTRE-URL/api/ingest/webflow`
 
-Le jeton passe par l'URL parce que Webflow ne permet pas d'ajouter un en-tête.
-Traitez donc cette URL comme un secret. Récupérez la clé de signature de ce
-webhook dans Webflow et placez-la dans `WEBFLOW_WEBHOOK_SECRET` : le serveur
-vérifie obligatoirement la signature en production. Les webhooks créés avec
+Récupérez la clé de signature de ce webhook dans Webflow et placez-la dans
+`WEBFLOW_WEBHOOK_SECRET` : le serveur vérifie obligatoirement la signature en
+production. Aucun secret n'est inclus dans l'URL. Les webhooks créés avec
 un jeton de site récent disposent de leur propre clé ; ceux d'une app OAuth
 utilisent le secret client de l'app.
 
@@ -237,18 +236,18 @@ un scénario Make hebdomadaire pour recevoir le récapitulatif dans Slack.
 Dès que `API_KEY` est définie, les scripts tiers peuvent accéder aux routes de
 lecture et d'écriture avec `Authorization: Bearer VOTRE_API_KEY`. L'interface
 utilise une session Supabase réservée aux adresses autorisées et vérifiée par
-un code TOTP. Une configuration Auth incomplète bloque le déploiement en
+un code TOTP. Une configuration Auth incomplète rend l'interface indisponible en
 production au lieu d'exposer les données. Le guide complet figure dans
 [`SUPABASE.md`](SUPABASE.md).
 
-Les routes d'ingestion ne sont pas concernées — elles ont leur propre jeton — ni
+Les routes d'ingestion ne sont pas concernées — elles ont leur propre secret — ni
 `/api/health`, volontairement publique.
 
 ## Récapitulatif des secrets
 
 | Secret | Protège | Qui le présente |
 | --- | --- | --- |
-| `INGEST_TOKEN` | `/api/ingest/email`, `/webflow`, `/formulaire` | Webflow, Make |
+| `INGEST_TOKEN` | `/api/ingest/email`, `/formulaire` | Make et relais e-mail |
 | `SLACK_SIGNING_SECRET` | signature des requêtes Slack | Slack (automatique) |
 | `WEBFLOW_WEBHOOK_SECRET` | signature Webflow, obligatoire en production | Webflow (automatique) |
 | `API_KEY` | lecture et écriture de l'API | outils tiers |

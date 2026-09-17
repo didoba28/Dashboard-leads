@@ -27,8 +27,8 @@ export interface ParamsVerificationSignatureWebflow {
  * Renvoie `null` si la requête est valide, sinon un message d'erreur explicite.
  *
  * Si `secret` est absent, la vérification est ignorée pour préserver le
- * développement local. La route bloque ce cas en production : la signature
- * et le jeton d'ingestion y sont tous deux requis.
+ * développement local, où la route exige alors le jeton d'ingestion. La route
+ * bloque ce cas en production : la signature est obligatoire.
  */
 export function verifierSignatureWebflow(params: ParamsVerificationSignatureWebflow): string | null {
   const { corpsBrut, timestamp, signature, secret } = params;

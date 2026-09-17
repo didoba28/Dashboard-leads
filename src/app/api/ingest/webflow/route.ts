@@ -20,9 +20,12 @@ export async function POST(request: Request) {
     });
     if (erreurSignature) return erreur(erreurSignature, 401);
 
-    // Webflow ne permet pas d'en-tête personnalisé : le jeton passe par `?token=`.
-    const erreurJeton = verifierJetonIngestion(request);
-    if (erreurJeton) return erreur(erreurJeton, 401);
+    // En local, un webhook sans signature garde l'ancien jeton de test.
+    // En production, la signature vérifiée suffit et aucun secret ne figure dans l'URL.
+    if (!process.env.WEBFLOW_WEBHOOK_SECRET) {
+      const erreurJeton = verifierJetonIngestion(request);
+      if (erreurJeton) return erreur(erreurJeton, 401);
+    }
 
     const payload: unknown = JSON.parse(corpsBrut);
     const entree = schemaWebflow.parse(payload);

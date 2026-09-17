@@ -98,6 +98,12 @@ const MIGRATIONS_POSTGRES: Migration[] = [
         duree_ms    INTEGER NOT NULL DEFAULT 0,
         succes      BOOLEAN NOT NULL DEFAULT TRUE
       );
+
+      -- Ferme les tables dès leur première transaction de création.
+      ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE objectifs ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE reglages ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE journal_sync ENABLE ROW LEVEL SECURITY;
     `,
   },
   {

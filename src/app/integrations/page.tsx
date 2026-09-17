@@ -15,7 +15,7 @@ export default async function PageIntegrations() {
   const base = process.env.APP_URL ?? `${protocole}://${hote}`;
   const slackConfigure = Boolean(process.env.SLACK_SIGNING_SECRET);
   const ingestionConfiguree = Boolean(process.env.INGEST_TOKEN);
-  const webflowConfigure = ingestionConfiguree && Boolean(process.env.WEBFLOW_WEBHOOK_SECRET);
+  const webflowConfigure = Boolean(process.env.WEBFLOW_WEBHOOK_SECRET);
   const cronConfigure = Boolean(process.env.CRON_SECRET);
 
   return (
@@ -72,10 +72,9 @@ export default async function PageIntegrations() {
         <div className="space-y-3 px-5 pb-5 text-xs text-ink-2">
           <p>
             Créez un webhook « Form submission » sur le site Webflow et renseignez cette URL.
-            Remplacez le texte du jeton par la valeur de <code className="rounded bg-surface-2 px-1">INGEST_TOKEN</code>.
             Ajoutez sa clé de signature dans <code className="rounded bg-surface-2 px-1">WEBFLOW_WEBHOOK_SECRET</code>.
           </p>
-          <BlocCode label="URL du webhook" contenu={`${base}/api/ingest/webflow?token=VOTRE_INGEST_TOKEN`} />
+          <BlocCode label="URL du webhook" contenu={`${base}/api/ingest/webflow`} />
           <p>
             Le nom du formulaire sert de lead magnet. Les champs « Nom et Prénom », « Commune »,
             « Mail » et « Téléphone » des formulaires AirFit sont reconnus.
