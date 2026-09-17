@@ -91,7 +91,8 @@ est utilisé.
 | --- | --- |
 | `types.ts` | L'interface `PiloteDonnees` que les deux moteurs respectent, et la convention SQL commune. |
 | `index.ts` | Choisit le pilote selon `DATABASE_URL` et mémorise la connexion pour le process. |
-| `sqlite.ts` | Pilote `better-sqlite3`. |
+| `sqlite-node.ts` | Pilote SQLite par défaut, via le module `node:sqlite` intégré à Node (rien à compiler). |
+| `sqlite.ts` | Pilote SQLite de repli, via `better-sqlite3`, pour Node antérieur à 22.5. |
 | `postgres.ts` | Pilote `pg` : traduit les placeholders `?` en `$1, $2, …`, gère les transactions sur un client dédié, active TLS si besoin. |
 | `migrations.ts` | Exécuteur de migrations idempotent, partagé par les deux pilotes. |
 
@@ -103,7 +104,8 @@ attention particulière sont documentés en tête de `postgres.ts` : placeholder
 ## Tests
 
 Les dix tests d'intégration de `src/lib/db/depot.test.ts` s'exécutent sur
-SQLite à chaque `npm test`. Pour les rejouer à l'identique sur PostgreSQL :
+SQLite à chaque `npm test`. `SQLITE_DRIVER=node` et `SQLITE_DRIVER=better`
+permettent de les rejouer sur chacun des deux pilotes SQLite. Pour les rejouer à l'identique sur PostgreSQL :
 
 ```bash
 createdb dashboard_leads_test

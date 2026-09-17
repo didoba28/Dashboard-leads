@@ -6,6 +6,13 @@ formulaire, leur applique les règles de comptage définies par l'équipe (point
 exclusions, arbitrages), suit l'avancement des objectifs et des primes du
 trimestre, et reste synchronisé avec un espace de travail Notion partagé.
 
+## Prérequis
+
+Node 22.5 ou plus récent (Node 24 recommandé) — vérifiez avec `node -v`. Cette
+version est requise parce que le stockage s'appuie sur le module `node:sqlite`
+intégré à Node : aucune dépendance à compiler, donc aucune chaîne de
+compilation C++ à installer.
+
 ## Démarrage rapide
 
 ```bash
@@ -167,7 +174,7 @@ src/
 │   ├── domain/                 Logique métier pure, sans I/O, entièrement testée :
 │   │                            taxonomie, scoring, objectifs/primes, classification,
 │   │                            périodes, modèle de lead et sa validation Zod
-│   ├── db/                     Persistance (SQLite/better-sqlite3) : leads, réglages,
+│   ├── db/                     Persistance (node:sqlite, better-sqlite3, PostgreSQL) : leads, réglages,
 │   │                            objectifs — seule couche qui parle SQL
 │   ├── notion/                 Correspondance de schéma et synchronisation Notion
 │   ├── ingest/                 Construction d'un lead à partir d'un message Slack
@@ -201,15 +208,26 @@ leads à partir d'un message Slack ou d'un e-mail.
 
 ## Base de données
 
-SQLite par défaut, via `better-sqlite3`. Le fichier est créé automatiquement à
-`data/leads.db` (chemin relatif au dossier du projet) au premier accès ; le
-chemin est surchageable par la variable d'environnement `DATABASE_PATH`.
+SQLite par défaut, via le module `node:sqlite` intégré à Node — rien à
+installer ni à compiler. Le fichier est créé automatiquement à `data/leads.db`
+(chemin relatif au dossier du projet) au premier accès ; le chemin est
+surchargeable par la variable d'environnement `DATABASE_PATH`.
+
+Sur une version de Node antérieure à 22.5, qui n'expose pas encore
+`node:sqlite`, l'application bascule sur `better-sqlite3` s'il est installé
+(`npm install better-sqlite3`). Sans l'un ni l'autre, elle s'arrête au
+démarrage avec un message qui rappelle les trois issues possibles : mettre Node
+à jour, installer `better-sqlite3`, ou passer à PostgreSQL.
+
+La variable `SQLITE_DRIVER` (`node` ou `better`) force un pilote précis ; elle
+sert surtout à rejouer la suite de tests sur les deux implémentations.
 
 ### PostgreSQL / Supabase
 
-Une bascule vers PostgreSQL/Supabase est prévue, pilotée par variable
-d'environnement. Le détail de cette bascule est documenté dans
-`docs/SUPABASE.md`.
+Pour un hébergement sans disque persistant (Vercel, Netlify…), définissez
+`DATABASE_URL` sur une chaîne de connexion PostgreSQL et l'application bascule
+sans autre changement. Marche à suivre complète dans
+[`docs/SUPABASE.md`](docs/SUPABASE.md).
 
 ## Variables d'environnement
 

@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@notionhq/client": "^5.26.0",
-    "better-sqlite3": "^13.0.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
     "next": "^15.5.25",
@@ -29,7 +28,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.3",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
@@ -40,5 +38,8 @@
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^5.0.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   }
 }

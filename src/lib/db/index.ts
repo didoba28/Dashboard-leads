@@ -8,7 +8,8 @@
  */
 import path from 'node:path';
 import type { PiloteDonnees } from './types';
-import { creerPiloteSqlite } from './sqlite';
+import { creerPiloteNodeSqlite, nodeSqliteDisponible } from './sqlite-node';
+import { betterSqliteDisponible, creerPiloteBetterSqlite } from './sqlite';
 import { creerPilotePostgres } from './postgres';
 
 export type { PiloteDonnees } from './types';
@@ -25,16 +26,53 @@ function urlPostgres(): string | null {
   return /^postgres(ql)?:\/\//.test(brut) ? brut : null;
 }
 
-/** Quel pilote sera (ou est) utilisé, déterminé uniquement par `DATABASE_URL`. */
-export function nomDuPilote(): 'sqlite' | 'postgres' {
-  return urlPostgres() ? 'postgres' : 'sqlite';
+export type NomPilote = 'postgres' | 'node-sqlite' | 'better-sqlite3';
+
+/**
+ * Permet de forcer un pilote SQLite précis (`node` ou `better`), essentiellement
+ * pour rejouer la même suite de tests sur les deux implémentations.
+ */
+function preferenceSqlite(): 'node' | 'better' | null {
+  const brut = process.env.SQLITE_DRIVER?.trim().toLowerCase();
+  if (brut === 'node' || brut === 'better') return brut;
+  return null;
+}
+
+/**
+ * Choisit le pilote SQLite : le module intégré à Node d'abord (rien à
+ * compiler), `better-sqlite3` ensuite si Node est trop ancien.
+ */
+async function choisirPiloteSqlite(): Promise<'node-sqlite' | 'better-sqlite3'> {
+  const preference = preferenceSqlite();
+  if (preference === 'better') return 'better-sqlite3';
+  if (preference === 'node') return 'node-sqlite';
+  return (await nodeSqliteDisponible()) ? 'node-sqlite' : 'better-sqlite3';
+}
+
+/** Quel pilote est réellement utilisé, une fois la connexion ouverte. */
+export async function nomDuPilote(): Promise<NomPilote> {
+  if (urlPostgres()) return 'postgres';
+  return choisirPiloteSqlite();
 }
 
 let instancePromise: Promise<PiloteDonnees> | null = null;
 
 async function initialiser(): Promise<PiloteDonnees> {
   const url = urlPostgres();
-  return url ? creerPilotePostgres(url) : creerPiloteSqlite(cheminBaseSqlite());
+  if (url) return creerPilotePostgres(url);
+
+  const chemin = cheminBaseSqlite();
+  const choix = await choisirPiloteSqlite();
+  if (choix === 'node-sqlite') return creerPiloteNodeSqlite(chemin);
+
+  if (!(await betterSqliteDisponible())) {
+    throw new Error(
+      "Aucun moteur SQLite disponible : ce Node n'expose pas `node:sqlite` (ajouté en 22.5) " +
+        "et `better-sqlite3` n'est pas installé. Mettez Node à jour (22.5+ ou, mieux, 24), " +
+        'ou installez `better-sqlite3`, ou définissez `DATABASE_URL` pour utiliser PostgreSQL.',
+    );
+  }
+  return creerPiloteBetterSqlite(chemin);
 }
 
 /** Connexion unique par process (mémoïse aussi l'application des migrations). */

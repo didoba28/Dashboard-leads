@@ -1,117 +1,49 @@
 /**
- * Pilote SQLite (better-sqlite3) — moteur par défaut.
+ * Pilote SQLite de repli, via le paquet natif `better-sqlite3`.
  *
- * SQLite reste volontaire pour un pôle Growth : le volume se compte en
- * milliers de lignes, tout tient en mémoire et le déploiement ne demande
- * aucun service externe.
+ * Il n'est utilisé que sur les versions de Node antérieures à 22.5, qui n'ont
+ * pas encore le module intégré `node:sqlite` (voir `sqlite-node.ts`). Comme
+ * `better-sqlite3` doit être compilé quand aucun binaire précompilé ne
+ * correspond à la version de Node, il est déclaré en dépendance *optionnelle*
+ * et importé dynamiquement : son absence ne casse ni l'installation, ni le
+ * démarrage.
  *
  * better-sqlite3 est entièrement synchrone (aucune E/S asynchrone réelle) ;
  * chaque méthode est simplement enveloppée dans une Promise résolue tout de
- * suite, pour respecter l'interface commune `PiloteDonnees` que partage le
- * pilote PostgreSQL.
+ * suite, pour respecter l'interface commune `PiloteDonnees`.
  */
-import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import type { PiloteDonnees } from './types';
-import { appliquerMigrations, type Migration } from './migrations';
+import { appliquerMigrations } from './migrations';
+import { MIGRATIONS_SQLITE } from './migrations-sqlite';
 
-const MIGRATIONS_SQLITE: Migration[] = [
-  {
-    nom: '001_initial',
-    sql: `
-      CREATE TABLE IF NOT EXISTS leads (
-        id                    TEXT PRIMARY KEY,
-        date_reception        TEXT NOT NULL,
-        nom                   TEXT,
-        email                 TEXT,
-        telephone             TEXT,
-        societe               TEXT,
-        fonction              TEXT,
-        ville                 TEXT,
-        segment               TEXT NOT NULL,
-        relation              TEXT NOT NULL,
-        type_demande          TEXT NOT NULL,
-        initiative            TEXT NOT NULL,
-        source_collecte       TEXT NOT NULL,
-        campagne              TEXT,
-        lead_magnet           TEXT,
-        message               TEXT,
-        statut                TEXT NOT NULL,
-        type_activation       TEXT,
-        date_activation       TEXT,
-        proprietaire          TEXT,
-        tags                  TEXT NOT NULL DEFAULT '[]',
-        eligible              INTEGER NOT NULL,
-        points                REAL NOT NULL,
-        eligible_activation   INTEGER NOT NULL,
-        regle_id              TEXT NOT NULL,
-        regle_label           TEXT NOT NULL,
-        explication           TEXT NOT NULL DEFAULT '',
-        points_override       REAL,
-        points_override_raison TEXT,
-        a_verifier            INTEGER NOT NULL DEFAULT 0,
-        confiance             REAL,
-        dedupe_key            TEXT,
-        notion_page_id        TEXT,
-        notion_last_synced_at TEXT,
-        raw_payload           TEXT,
-        created_at            TEXT NOT NULL,
-        updated_at            TEXT NOT NULL,
-        deleted_at            TEXT
-      );
+/** Sous-ensemble de l'API better-sqlite3 réellement utilisé ici. */
+interface BaseBetterSqlite {
+  prepare(sql: string): {
+    get(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+    run(...params: unknown[]): { changes: number };
+  };
+  exec(sql: string): void;
+  pragma(instruction: string): unknown;
+  close(): void;
+}
 
-      CREATE INDEX IF NOT EXISTS idx_leads_date ON leads(date_reception);
-      CREATE INDEX IF NOT EXISTS idx_leads_statut ON leads(statut);
-      CREATE INDEX IF NOT EXISTS idx_leads_dedupe ON leads(dedupe_key);
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_notion ON leads(notion_page_id)
-        WHERE notion_page_id IS NOT NULL;
-
-      CREATE TABLE IF NOT EXISTS objectifs (
-        periode                              TEXT PRIMARY KEY,
-        cible_points                         REAL NOT NULL,
-        paliers_points                       TEXT NOT NULL,
-        paliers_activation                   TEXT NOT NULL,
-        prime_par_opportunite_supplementaire REAL NOT NULL,
-        cible_activation                     REAL NOT NULL,
-        updated_at                           TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS reglages (
-        cle        TEXT PRIMARY KEY,
-        valeur     TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS journal_sync (
-        id          TEXT PRIMARY KEY,
-        lance_le    TEXT NOT NULL,
-        direction   TEXT NOT NULL,
-        crees       INTEGER NOT NULL DEFAULT 0,
-        maj         INTEGER NOT NULL DEFAULT 0,
-        ignores     INTEGER NOT NULL DEFAULT 0,
-        erreurs     TEXT NOT NULL DEFAULT '[]',
-        duree_ms    INTEGER NOT NULL DEFAULT 0,
-        succes      INTEGER NOT NULL DEFAULT 1
-      );
-    `,
-  },
-];
-
-class PiloteSqlite implements PiloteDonnees {
-  constructor(private readonly db: Database.Database) {}
+class PiloteBetterSqlite implements PiloteDonnees {
+  constructor(private readonly db: BaseBetterSqlite) {}
 
   async get<T>(sql: string, params: unknown[] = []): Promise<T | undefined> {
-    return this.db.prepare<unknown[], T>(sql).get(...params);
+    return this.db.prepare(sql).get(...params) as T | undefined;
   }
 
   async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
-    return this.db.prepare<unknown[], T>(sql).all(...params);
+    return this.db.prepare(sql).all(...params) as T[];
   }
 
   async run(sql: string, params: unknown[] = []): Promise<{ changes: number }> {
-    const resultat = this.db.prepare(sql).run(...params);
-    return { changes: resultat.changes };
+    return { changes: this.db.prepare(sql).run(...params).changes };
   }
 
   async exec(sql: string): Promise<void> {
@@ -137,12 +69,37 @@ class PiloteSqlite implements PiloteDonnees {
   }
 }
 
-export async function creerPiloteSqlite(chemin: string): Promise<PiloteDonnees> {
+/**
+ * Chargement à l'exécution, volontairement opaque pour le bundler : un
+ * `import('better-sqlite3')` littéral serait résolu à la compilation, et le
+ * build échouerait sur les machines où la dépendance optionnelle n'a pas pu
+ * être installée — exactement le cas que ce pilote de repli doit couvrir.
+ */
+function chargerBetterSqlite(): new (chemin: string) => BaseBetterSqlite {
+  const requerir = createRequire(path.join(process.cwd(), 'index.js'));
+  const module = requerir('better-sqlite3') as
+    | (new (chemin: string) => BaseBetterSqlite)
+    | { default: new (chemin: string) => BaseBetterSqlite };
+  return 'default' in module ? module.default : module;
+}
+
+/** `true` si `better-sqlite3` est installé et chargeable sur cette machine. */
+export async function betterSqliteDisponible(): Promise<boolean> {
+  try {
+    chargerBetterSqlite();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function creerPiloteBetterSqlite(chemin: string): Promise<PiloteDonnees> {
+  const Database = chargerBetterSqlite();
   fs.mkdirSync(path.dirname(chemin), { recursive: true });
   const db = new Database(chemin);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  const pilote = new PiloteSqlite(db);
+  const pilote = new PiloteBetterSqlite(db);
   await appliquerMigrations(pilote, MIGRATIONS_SQLITE);
   return pilote;
 }
