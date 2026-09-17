@@ -41,15 +41,16 @@ interface LigneLead {
   date_activation: string | null;
   proprietaire: string | null;
   tags: string;
-  eligible: number;
+  // SQLite renvoie 0/1, PostgreSQL renvoie un booléen natif : `Boolean(...)` absorbe les deux.
+  eligible: number | boolean;
   points: number;
-  eligible_activation: number;
+  eligible_activation: number | boolean;
   regle_id: string;
   regle_label: string;
   explication: string;
   points_override: number | null;
   points_override_raison: string | null;
-  a_verifier: number;
+  a_verifier: number | boolean;
   confiance: number | null;
   dedupe_key: string | null;
   notion_page_id: string | null;
@@ -82,15 +83,15 @@ function versLead(l: LigneLead): Lead {
     dateActivation: l.date_activation,
     proprietaire: l.proprietaire,
     tags: parseJson<string[]>(l.tags, []),
-    eligible: l.eligible === 1,
+    eligible: Boolean(l.eligible),
     points: l.points,
-    eligibleActivation: l.eligible_activation === 1,
+    eligibleActivation: Boolean(l.eligible_activation),
     regleId: l.regle_id,
     regleLabel: l.regle_label,
     explication: l.explication,
     pointsOverride: l.points_override,
     pointsOverrideRaison: l.points_override_raison,
-    aVerifier: l.a_verifier === 1,
+    aVerifier: Boolean(l.a_verifier),
     confiance: l.confiance,
     dedupeKey: l.dedupe_key,
     notionPageId: l.notion_page_id,
@@ -188,6 +189,8 @@ function construireWhere(f: FiltresLeads): ClauseWhere {
     params.push(f.proprietaire);
   }
   if (f.q && f.q.trim() !== '') {
+    // `lower(...) LIKE ?` (motif déjà en minuscules) est valide sur SQLite comme
+    // PostgreSQL : pas besoin de distinguer `LIKE` (SQLite) et `ILIKE` (PostgreSQL).
     const motif = `%${f.q.trim().toLowerCase()}%`;
     conditions.push(
       '(lower(coalesce(nom, %s)) LIKE ? OR lower(coalesce(email, %s)) LIKE ? OR lower(coalesce(societe, %s)) LIKE ? OR lower(coalesce(message, %s)) LIKE ? OR lower(coalesce(lead_magnet, %s)) LIKE ?)'.replaceAll(
@@ -208,79 +211,84 @@ const TRIS: Record<NonNullable<FiltresLeads['tri']>, string> = {
   maj_desc: 'updated_at DESC',
 };
 
-export function listerLeads(filtres: FiltresLeads = {}): { leads: Lead[]; total: number } {
-  const db = getDb();
+export async function listerLeads(
+  filtres: FiltresLeads = {},
+): Promise<{ leads: Lead[]; total: number }> {
+  const db = await getDb();
   const where = construireWhere(filtres);
   const tri = TRIS[filtres.tri ?? 'date_desc'];
   const limite = Math.min(Math.max(filtres.limite ?? 100, 1), 1000);
   const offset = Math.max(filtres.offset ?? 0, 0);
 
-  const total = db
-    .prepare<unknown[], { n: number }>(`SELECT COUNT(*) AS n FROM leads WHERE ${where.sql}`)
-    .get(...where.params)!.n;
+  // `n` revient en `bigint` texte côté PostgreSQL (`COUNT(*)`) : toujours repasser par `Number(...)`.
+  const ligneTotal = await db.get<{ n: number | string }>(
+    `SELECT COUNT(*) AS n FROM leads WHERE ${where.sql}`,
+    where.params,
+  );
+  const total = Number(ligneTotal?.n ?? 0);
 
-  const lignes = db
-    .prepare<unknown[], LigneLead>(
-      `SELECT ${COLONNES} FROM leads WHERE ${where.sql} ORDER BY ${tri} LIMIT ? OFFSET ?`,
-    )
-    .all(...where.params, limite, offset);
+  const lignes = await db.all<LigneLead>(
+    `SELECT ${COLONNES} FROM leads WHERE ${where.sql} ORDER BY ${tri} LIMIT ? OFFSET ?`,
+    [...where.params, limite, offset],
+  );
 
   return { leads: lignes.map(versLead), total };
 }
 
 /** Tous les leads correspondant aux filtres, sans pagination (agrégations). */
-export function listerTousLeads(filtres: FiltresLeads = {}): Lead[] {
-  const db = getDb();
+export async function listerTousLeads(filtres: FiltresLeads = {}): Promise<Lead[]> {
+  const db = await getDb();
   const where = construireWhere(filtres);
-  const lignes = db
-    .prepare<unknown[], LigneLead>(
-      `SELECT ${COLONNES} FROM leads WHERE ${where.sql} ORDER BY date_reception ASC`,
-    )
-    .all(...where.params);
+  const lignes = await db.all<LigneLead>(
+    `SELECT ${COLONNES} FROM leads WHERE ${where.sql} ORDER BY date_reception ASC`,
+    where.params,
+  );
   return lignes.map(versLead);
 }
 
-export function lireLead(id: string): Lead | null {
-  const db = getDb();
-  const ligne = db
-    .prepare<[string], LigneLead>(`SELECT ${COLONNES} FROM leads WHERE id = ? AND deleted_at IS NULL`)
-    .get(id);
+export async function lireLead(id: string): Promise<Lead | null> {
+  const db = await getDb();
+  const ligne = await db.get<LigneLead>(
+    `SELECT ${COLONNES} FROM leads WHERE id = ? AND deleted_at IS NULL`,
+    [id],
+  );
   return ligne ? versLead(ligne) : null;
 }
 
-export function lireLeadParNotionPageId(notionPageId: string): Lead | null {
-  const db = getDb();
-  const ligne = db
-    .prepare<[string], LigneLead>(
-      `SELECT ${COLONNES} FROM leads WHERE notion_page_id = ? AND deleted_at IS NULL`,
-    )
-    .get(notionPageId);
+export async function lireLeadParNotionPageId(notionPageId: string): Promise<Lead | null> {
+  const db = await getDb();
+  const ligne = await db.get<LigneLead>(
+    `SELECT ${COLONNES} FROM leads WHERE notion_page_id = ? AND deleted_at IS NULL`,
+    [notionPageId],
+  );
   return ligne ? versLead(ligne) : null;
 }
 
 /** Cherche un doublon récent sur la même clé de déduplication. */
-export function trouverDoublon(dedupeKey: string | null, fenetreJours?: number): Lead | null {
+export async function trouverDoublon(
+  dedupeKey: string | null,
+  fenetreJours?: number,
+): Promise<Lead | null> {
   if (!dedupeKey) return null;
-  const db = getDb();
-  const fenetre = fenetreJours ?? lireReglages().fenetreDedupeJours;
+  const db = await getDb();
+  const fenetre = fenetreJours ?? (await lireReglages()).fenetreDedupeJours;
   const depuis = new Date(Date.now() - fenetre * 86_400_000).toISOString().slice(0, 10);
-  const ligne = db
-    .prepare<[string, string], LigneLead>(
-      `SELECT ${COLONNES} FROM leads
-       WHERE dedupe_key = ? AND date_reception >= ? AND deleted_at IS NULL
-       ORDER BY date_reception DESC LIMIT 1`,
-    )
-    .get(dedupeKey, depuis);
+  const ligne = await db.get<LigneLead>(
+    `SELECT ${COLONNES} FROM leads
+     WHERE dedupe_key = ? AND date_reception >= ? AND deleted_at IS NULL
+     ORDER BY date_reception DESC LIMIT 1`,
+    [dedupeKey, depuis],
+  );
   return ligne ? versLead(ligne) : null;
 }
 
-function appliquerScoring(champs: {
+async function appliquerScoring(champs: {
   segment: Segment;
   relation: Relation;
   typeDemande: TypeDemande;
   initiative: Initiative;
 }) {
-  return scorerLead(champs, { arbitrageB2cNewsletter: lireReglages().arbitrageB2cNewsletter });
+  return scorerLead(champs, { arbitrageB2cNewsletter: (await lireReglages()).arbitrageB2cNewsletter });
 }
 
 export interface OptionsCreation {
@@ -296,10 +304,13 @@ export interface ResultatCreation {
   doublon: boolean;
 }
 
-export function creerLead(input: LeadParsed, options: OptionsCreation = {}): ResultatCreation {
-  const db = getDb();
+export async function creerLead(
+  input: LeadParsed,
+  options: OptionsCreation = {},
+): Promise<ResultatCreation> {
+  const db = await getDb();
   const dateReception = input.dateReception ?? aujourdHui();
-  const score = appliquerScoring(input);
+  const score = await appliquerScoring(input);
   const dedupeKey = calculerDedupeKey({
     email: input.email ?? null,
     telephone: input.telephone ?? null,
@@ -310,13 +321,52 @@ export function creerLead(input: LeadParsed, options: OptionsCreation = {}): Res
   });
 
   if (options.dedupliquer !== false) {
-    const existant = trouverDoublon(dedupeKey);
+    const existant = await trouverDoublon(dedupeKey);
     if (existant) return { lead: existant, doublon: true };
   }
 
   const now = maintenantIso();
   const id = options.id ?? nouvelId();
-  db.prepare(
+  const params: unknown[] = [
+    id,
+    dateReception,
+    input.nom ?? null,
+    input.email ?? null,
+    input.telephone ?? null,
+    input.societe ?? null,
+    input.fonction ?? null,
+    input.ville ?? null,
+    input.segment,
+    input.relation,
+    input.typeDemande,
+    input.initiative,
+    input.sourceCollecte,
+    input.campagne ?? null,
+    input.leadMagnet ?? null,
+    input.message ?? null,
+    input.statut,
+    input.typeActivation ?? null,
+    input.dateActivation ?? null,
+    input.proprietaire ?? null,
+    JSON.stringify(input.tags ?? []),
+    score.eligible ? 1 : 0,
+    score.points,
+    score.eligibleActivation ? 1 : 0,
+    score.regleId,
+    score.regleLabel,
+    score.explication,
+    input.pointsOverride ?? null,
+    input.pointsOverrideRaison ?? null,
+    input.aVerifier ? 1 : 0,
+    input.confiance ?? null,
+    dedupeKey,
+    input.notionPageId ?? null,
+    input.rawPayload === undefined ? null : JSON.stringify(input.rawPayload),
+    now,
+    now,
+  ];
+
+  await db.run(
     `INSERT INTO leads (
       id, date_reception, nom, email, telephone, societe, fonction, ville, segment, relation,
       type_demande, initiative, source_collecte, campagne, lead_magnet, message, statut,
@@ -324,52 +374,16 @@ export function creerLead(input: LeadParsed, options: OptionsCreation = {}): Res
       regle_id, regle_label, explication, points_override, points_override_raison, a_verifier,
       confiance, dedupe_key, notion_page_id, notion_last_synced_at, raw_payload, created_at, updated_at
     ) VALUES (
-      @id, @dateReception, @nom, @email, @telephone, @societe, @fonction, @ville, @segment, @relation,
-      @typeDemande, @initiative, @sourceCollecte, @campagne, @leadMagnet, @message, @statut,
-      @typeActivation, @dateActivation, @proprietaire, @tags, @eligible, @points, @eligibleActivation,
-      @regleId, @regleLabel, @explication, @pointsOverride, @pointsOverrideRaison, @aVerifier,
-      @confiance, @dedupeKey, @notionPageId, NULL, @rawPayload, @createdAt, @updatedAt
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, NULL, ?, ?, ?
     )`,
-  ).run({
-    id,
-    dateReception,
-    nom: input.nom ?? null,
-    email: input.email ?? null,
-    telephone: input.telephone ?? null,
-    societe: input.societe ?? null,
-    fonction: input.fonction ?? null,
-    ville: input.ville ?? null,
-    segment: input.segment,
-    relation: input.relation,
-    typeDemande: input.typeDemande,
-    initiative: input.initiative,
-    sourceCollecte: input.sourceCollecte,
-    campagne: input.campagne ?? null,
-    leadMagnet: input.leadMagnet ?? null,
-    message: input.message ?? null,
-    statut: input.statut,
-    typeActivation: input.typeActivation ?? null,
-    dateActivation: input.dateActivation ?? null,
-    proprietaire: input.proprietaire ?? null,
-    tags: JSON.stringify(input.tags ?? []),
-    eligible: score.eligible ? 1 : 0,
-    points: score.points,
-    eligibleActivation: score.eligibleActivation ? 1 : 0,
-    regleId: score.regleId,
-    regleLabel: score.regleLabel,
-    explication: score.explication,
-    pointsOverride: input.pointsOverride ?? null,
-    pointsOverrideRaison: input.pointsOverrideRaison ?? null,
-    aVerifier: input.aVerifier ? 1 : 0,
-    confiance: input.confiance ?? null,
-    dedupeKey,
-    notionPageId: input.notionPageId ?? null,
-    rawPayload: input.rawPayload === undefined ? null : JSON.stringify(input.rawPayload),
-    createdAt: now,
-    updatedAt: now,
-  });
+    params,
+  );
 
-  return { lead: lireLead(id)!, doublon: false };
+  return { lead: (await lireLead(id))!, doublon: false };
 }
 
 /** Champs autorisés en mise à jour, avec leur colonne SQL. */
@@ -407,32 +421,32 @@ export interface OptionsMaj {
   conserverUpdatedAt?: boolean;
 }
 
-export function mettreAJourLead(
+export async function mettreAJourLead(
   id: string,
   patch: Partial<LeadParsed>,
   options: OptionsMaj = {},
-): Lead | null {
-  const db = getDb();
-  const actuel = lireLead(id);
+): Promise<Lead | null> {
+  const db = await getDb();
+  const actuel = await lireLead(id);
   if (!actuel) return null;
 
   const assignations: string[] = [];
-  const params: Record<string, unknown> = { id };
+  const params: unknown[] = [];
 
   for (const [cle, colonne] of Object.entries(COLONNES_PATCH)) {
     if (!(cle in patch)) continue;
     const valeur = (patch as Record<string, unknown>)[cle];
     if (valeur === undefined) continue;
-    assignations.push(`${colonne} = @${cle}`);
-    params[cle] = typeof valeur === 'boolean' ? (valeur ? 1 : 0) : valeur;
+    assignations.push(`${colonne} = ?`);
+    params.push(typeof valeur === 'boolean' ? (valeur ? 1 : 0) : valeur);
   }
   if (patch.tags !== undefined) {
-    assignations.push('tags = @tags');
-    params['tags'] = JSON.stringify(patch.tags);
+    assignations.push('tags = ?');
+    params.push(JSON.stringify(patch.tags));
   }
   if (patch.rawPayload !== undefined) {
-    assignations.push('raw_payload = @rawPayload');
-    params['rawPayload'] = JSON.stringify(patch.rawPayload);
+    assignations.push('raw_payload = ?');
+    params.push(JSON.stringify(patch.rawPayload));
   }
 
   // Re-scoring dès qu'une dimension du moteur change.
@@ -442,21 +456,23 @@ export function mettreAJourLead(
     typeDemande: patch.typeDemande ?? actuel.typeDemande,
     initiative: patch.initiative ?? actuel.initiative,
   };
-  const score = appliquerScoring(dimensions);
+  const score = await appliquerScoring(dimensions);
   assignations.push(
-    'eligible = @eligible',
-    'points = @points',
-    'eligible_activation = @eligibleActivation',
-    'regle_id = @regleId',
-    'regle_label = @regleLabel',
-    'explication = @explication',
+    'eligible = ?',
+    'points = ?',
+    'eligible_activation = ?',
+    'regle_id = ?',
+    'regle_label = ?',
+    'explication = ?',
   );
-  params['eligible'] = score.eligible ? 1 : 0;
-  params['points'] = score.points;
-  params['eligibleActivation'] = score.eligibleActivation ? 1 : 0;
-  params['regleId'] = score.regleId;
-  params['regleLabel'] = score.regleLabel;
-  params['explication'] = score.explication;
+  params.push(
+    score.eligible ? 1 : 0,
+    score.points,
+    score.eligibleActivation ? 1 : 0,
+    score.regleId,
+    score.regleLabel,
+    score.explication,
+  );
 
   // La clé de dédup suit l'identité et la ressource.
   const dedupeKey = calculerDedupeKey({
@@ -467,63 +483,65 @@ export function mettreAJourLead(
     leadMagnet: patch.leadMagnet !== undefined ? patch.leadMagnet : actuel.leadMagnet,
     dateReception: patch.dateReception ?? actuel.dateReception,
   });
-  assignations.push('dedupe_key = @dedupeKey');
-  params['dedupeKey'] = dedupeKey;
+  assignations.push('dedupe_key = ?');
+  params.push(dedupeKey);
 
   if (options.notionLastSyncedAt) {
-    assignations.push('notion_last_synced_at = @notionLastSyncedAt');
-    params['notionLastSyncedAt'] = options.notionLastSyncedAt;
+    assignations.push('notion_last_synced_at = ?');
+    params.push(options.notionLastSyncedAt);
   }
-  assignations.push('updated_at = @updatedAt');
-  params['updatedAt'] = options.conserverUpdatedAt ? actuel.updatedAt : maintenantIso();
+  assignations.push('updated_at = ?');
+  params.push(options.conserverUpdatedAt ? actuel.updatedAt : maintenantIso());
 
-  db.prepare(`UPDATE leads SET ${assignations.join(', ')} WHERE id = @id`).run(params);
+  params.push(id);
+  await db.run(`UPDATE leads SET ${assignations.join(', ')} WHERE id = ?`, params);
   return lireLead(id);
 }
 
-export function marquerSynchronise(id: string, notionPageId: string, quand: string): void {
-  getDb()
-    .prepare('UPDATE leads SET notion_page_id = ?, notion_last_synced_at = ? WHERE id = ?')
-    .run(notionPageId, quand, id);
+export async function marquerSynchronise(
+  id: string,
+  notionPageId: string,
+  quand: string,
+): Promise<void> {
+  const db = await getDb();
+  await db.run('UPDATE leads SET notion_page_id = ?, notion_last_synced_at = ? WHERE id = ?', [
+    notionPageId,
+    quand,
+    id,
+  ]);
 }
 
-export function supprimerLead(id: string): boolean {
-  const res = getDb()
-    .prepare('UPDATE leads SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
-    .run(maintenantIso(), maintenantIso(), id);
+export async function supprimerLead(id: string): Promise<boolean> {
+  const db = await getDb();
+  const res = await db.run(
+    'UPDATE leads SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL',
+    [maintenantIso(), maintenantIso(), id],
+  );
   return res.changes > 0;
 }
 
 /** Leads modifiés localement depuis la dernière synchronisation Notion. */
-export function leadsAPousser(): Lead[] {
-  const db = getDb();
-  const lignes = db
-    .prepare<[], LigneLead>(
-      `SELECT ${COLONNES} FROM leads
-       WHERE deleted_at IS NULL
-         AND (notion_page_id IS NULL OR notion_last_synced_at IS NULL OR updated_at > notion_last_synced_at)
-       ORDER BY updated_at ASC`,
-    )
-    .all();
+export async function leadsAPousser(): Promise<Lead[]> {
+  const db = await getDb();
+  const lignes = await db.all<LigneLead>(
+    `SELECT ${COLONNES} FROM leads
+     WHERE deleted_at IS NULL
+       AND (notion_page_id IS NULL OR notion_last_synced_at IS NULL OR updated_at > notion_last_synced_at)
+     ORDER BY updated_at ASC`,
+  );
   return lignes.map(versLead);
 }
 
 /** Recalcule le score de tous les leads (après changement d'arbitrage). */
-export function rescorerTout(): number {
-  const db = getDb();
-  const lignes = db
-    .prepare<[], LigneLead>(`SELECT ${COLONNES} FROM leads WHERE deleted_at IS NULL`)
-    .all();
-  const maj = db.prepare(
-    `UPDATE leads SET eligible = ?, points = ?, eligible_activation = ?, regle_id = ?,
-       regle_label = ?, explication = ?, updated_at = ? WHERE id = ?`,
-  );
+export async function rescorerTout(): Promise<number> {
+  const db = await getDb();
+  const lignes = await db.all<LigneLead>(`SELECT ${COLONNES} FROM leads WHERE deleted_at IS NULL`);
   const now = maintenantIso();
   let n = 0;
-  db.transaction(() => {
+  await db.transaction(async (tx) => {
     for (const ligne of lignes) {
       const lead = versLead(ligne);
-      const score = appliquerScoring(lead);
+      const score = await appliquerScoring(lead);
       if (
         score.eligible === lead.eligible &&
         score.points === lead.points &&
@@ -532,18 +550,22 @@ export function rescorerTout(): number {
       ) {
         continue;
       }
-      maj.run(
-        score.eligible ? 1 : 0,
-        score.points,
-        score.eligibleActivation ? 1 : 0,
-        score.regleId,
-        score.regleLabel,
-        score.explication,
-        now,
-        lead.id,
+      await tx.run(
+        `UPDATE leads SET eligible = ?, points = ?, eligible_activation = ?, regle_id = ?,
+           regle_label = ?, explication = ?, updated_at = ? WHERE id = ?`,
+        [
+          score.eligible ? 1 : 0,
+          score.points,
+          score.eligibleActivation ? 1 : 0,
+          score.regleId,
+          score.regleLabel,
+          score.explication,
+          now,
+          lead.id,
+        ],
       );
       n++;
     }
-  })();
+  });
   return n;
 }

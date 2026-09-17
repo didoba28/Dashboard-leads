@@ -12,7 +12,7 @@ export default async function PageLeads({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const reglages = lireReglages();
+  const reglages = await lireReglages();
   const demande = typeof params['periode'] === 'string' ? params['periode'] : null;
   const periode = demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
   const aVerifier = params['aVerifier'] === 'true';
@@ -28,7 +28,11 @@ export default async function PageLeads({
     tri: 'date_desc',
   };
 
-  const { leads, total } = listerLeads({ periode, aVerifier: aVerifier ? true : undefined, limite: 50 });
+  const { leads, total } = await listerLeads({
+    periode,
+    aVerifier: aVerifier ? true : undefined,
+    limite: 50,
+  });
 
   return (
     <VueLeads

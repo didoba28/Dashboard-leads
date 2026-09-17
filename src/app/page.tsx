@@ -18,15 +18,17 @@ export default async function PageAccueil({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const reglages = lireReglages();
+  const reglages = await lireReglages();
   const demande = typeof params['periode'] === 'string' ? params['periode'] : null;
   const periode = demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
 
-  const stats = construireStats({
-    leads: listerTousLeads({ periode }),
-    leadsPeriodePrecedente: listerTousLeads({ periode: periodePrecedente(periode) }),
-    objectif: lireObjectif(periode),
-  });
+  const [leads, leadsPeriodePrecedente, objectifPeriode] = await Promise.all([
+    listerTousLeads({ periode }),
+    listerTousLeads({ periode: periodePrecedente(periode) }),
+    lireObjectif(periode),
+  ]);
+
+  const stats = construireStats({ leads, leadsPeriodePrecedente, objectif: objectifPeriode });
 
   const { kpis, synthese, objectif } = stats;
   const parStatut = new Map(stats.parStatut.map((s) => [s.cle, s.leads]));

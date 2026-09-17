@@ -7,7 +7,7 @@ import { Badge, Carte, EnteteCarte } from '@/components/ui/primitives';
 export const dynamic = 'force-dynamic';
 
 export default async function PageIntegrations() {
-  const etat = etatNotion();
+  const etat = await etatNotion();
   const base = process.env.APP_URL ?? 'https://votre-domaine.fr';
   const slackConfigure = Boolean(process.env.SLACK_SIGNING_SECRET);
   const ingestionConfiguree = Boolean(process.env.INGEST_TOKEN);

@@ -14,10 +14,10 @@ export default async function PageObjectifs({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const reglages = lireReglages();
+  const reglages = await lireReglages();
   const demande = typeof params['periode'] === 'string' ? params['periode'] : null;
   const periode = demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
-  const kpis = calculerKpis(listerTousLeads({ periode }));
+  const kpis = calculerKpis(await listerTousLeads({ periode }));
 
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-5">
@@ -35,7 +35,7 @@ export default async function PageObjectifs({
       </header>
 
       <EditeurObjectif
-        objectifInitial={lireObjectif(periode)}
+        objectifInitial={await lireObjectif(periode)}
         pointsReels={kpis.points}
         opportunitesReelles={kpis.opportunites}
       />

@@ -40,7 +40,7 @@ const GRILLE = [
 ];
 
 export default async function PageRegles() {
-  const reglages = lireReglages();
+  const reglages = await lireReglages();
 
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-5">

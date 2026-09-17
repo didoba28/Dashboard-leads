@@ -22,8 +22,8 @@ const schemaObjectif = z.object({
 export async function GET(request: Request) {
   try {
     const periode = new URL(request.url).searchParams.get('periode');
-    if (periode) return ok(lireObjectif(periode));
-    return ok(lireTousObjectifs());
+    if (periode) return ok(await lireObjectif(periode));
+    return ok(await lireTousObjectifs());
   } catch (err) {
     return gererErreur(err);
   }
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    return ok(ecrireObjectif(schemaObjectif.parse(await request.json())));
+    return ok(await ecrireObjectif(schemaObjectif.parse(await request.json())));
   } catch (err) {
     return gererErreur(err);
   }

@@ -347,13 +347,14 @@ for (let i = 0; opportunitesT4 < CIBLE_OPPORTUNITES_T4 && i < candidatsPromotion
 
 // --- Écriture en base -------------------------------------------------------
 
-function main(): void {
+async function main(): Promise<void> {
   const RESET = process.argv.includes('--reset');
-  const db = getDb();
-  const { n } = db.prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM leads').get()!;
+  const db = await getDb();
+  const ligne = await db.get<{ n: number | string }>('SELECT COUNT(*) AS n FROM leads');
+  const n = Number(ligne?.n ?? 0);
 
   if (RESET) {
-    db.exec('DELETE FROM leads');
+    await db.exec('DELETE FROM leads');
   } else if (n > 0) {
     console.error(
       `La base contient déjà ${n} lead(s). Relancez avec --reset pour la réinitialiser avant de regénérer le jeu de démonstration.`,
@@ -364,13 +365,13 @@ function main(): void {
   let crees = 0;
   for (const lead of leadsGeneres) {
     const parsed = schemaLeadInput.parse(lead);
-    creerLead(parsed, { dedupliquer: false });
+    await creerLead(parsed, { dedupliquer: false });
     crees++;
   }
 
-  ecrireObjectif({ periode: '2026-Q4', ...OBJECTIF_DEFAUT });
+  await ecrireObjectif({ periode: '2026-Q4', ...OBJECTIF_DEFAUT });
 
-  const leadsT4 = listerTousLeads({ periode: '2026-Q4' });
+  const leadsT4 = await listerTousLeads({ periode: '2026-Q4' });
   const pointsT4 = leadsT4.reduce((s, l) => s + pointsDuLead(l), 0);
   const oppsT4 = leadsT4.filter(estOpportuniteInbound).length;
 
@@ -381,4 +382,7 @@ function main(): void {
   console.log('Objectif 2026-Q4 écrit (valeurs par défaut).');
 }
 
-main();
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

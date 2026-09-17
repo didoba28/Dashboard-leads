@@ -7,14 +7,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const periode = new URL(request.url).searchParams.get('periode') ?? lireReglages().periodeActive;
-    return ok(
-      construireStats({
-        leads: listerTousLeads({ periode }),
-        leadsPeriodePrecedente: listerTousLeads({ periode: periodePrecedente(periode) }),
-        objectif: lireObjectif(periode),
-      }),
-    );
+    const periode = new URL(request.url).searchParams.get('periode') ?? (await lireReglages()).periodeActive;
+    const [leads, leadsPeriodePrecedente, objectif] = await Promise.all([
+      listerTousLeads({ periode }),
+      listerTousLeads({ periode: periodePrecedente(periode) }),
+      lireObjectif(periode),
+    ]);
+    return ok(construireStats({ leads, leadsPeriodePrecedente, objectif }));
   } catch (err) {
     return gererErreur(err);
   }

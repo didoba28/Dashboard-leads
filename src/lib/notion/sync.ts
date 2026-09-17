@@ -43,7 +43,7 @@ interface Cible {
 
 /** Résout la base et la data source Notion à utiliser. */
 export async function resoudreCible(): Promise<Cible> {
-  const reglages = lireReglages();
+  const reglages = await lireReglages();
   const databaseId = process.env.NOTION_DATABASE_ID ?? reglages.notionDatabaseId;
   if (!databaseId) {
     throw new Error(
@@ -57,7 +57,7 @@ export async function resoudreCible(): Promise<Cible> {
   const base = await notion.databases.retrieve({ database_id: databaseId });
   const dataSourceId = (base as { data_sources?: Array<{ id: string }> }).data_sources?.[0]?.id;
   if (!dataSourceId) throw new Error(`La base Notion ${databaseId} n'expose aucune data source.`);
-  ecrireReglages({ notionDatabaseId: databaseId, notionDataSourceId: dataSourceId });
+  await ecrireReglages({ notionDatabaseId: databaseId, notionDataSourceId: dataSourceId });
   return { databaseId, dataSourceId };
 }
 
@@ -100,7 +100,7 @@ export async function configurerNotion(params: {
         properties: manquantes as never,
       });
     }
-    ecrireReglages({ notionDatabaseId: databaseId, notionDataSourceId: dataSourceId });
+    await ecrireReglages({ notionDatabaseId: databaseId, notionDataSourceId: dataSourceId });
     return {
       databaseId,
       dataSourceId,
@@ -123,7 +123,7 @@ export async function configurerNotion(params: {
   });
   const dataSourceId = (base as { data_sources?: Array<{ id: string }> }).data_sources?.[0]?.id;
   if (!dataSourceId) throw new Error("La base Notion créée n'expose aucune data source.");
-  ecrireReglages({ notionDatabaseId: base.id, notionDataSourceId: dataSourceId });
+  await ecrireReglages({ notionDatabaseId: base.id, notionDataSourceId: dataSourceId });
   return {
     databaseId: base.id,
     dataSourceId,
@@ -144,7 +144,7 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
   try {
     const notion = getNotion();
     const { dataSourceId } = await resoudreCible();
-    const reglages = lireReglages();
+    const reglages = await lireReglages();
     // Marge de 5 minutes pour absorber les décalages d'horloge.
     const depuis = reglages.notionDernierPull
       ? new Date(Date.parse(reglages.notionDernierPull) - 5 * 60_000).toISOString()
@@ -162,7 +162,8 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
       if (!isFullPage(page)) continue;
       try {
         const { patch, idDashboard } = depuisPageNotion(page);
-        const existant = lireLeadParNotionPageId(page.id) ?? (idDashboard ? lireLead(idDashboard) : null);
+        const existant =
+          (await lireLeadParNotionPageId(page.id)) ?? (idDashboard ? await lireLead(idDashboard) : null);
 
         if (!existant) {
           const parsed = schemaLeadInput.parse({
@@ -170,11 +171,11 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
             sourceCollecte: patch.sourceCollecte ?? 'notion',
             notionPageId: page.id,
           });
-          const { lead, doublon } = creerLead(parsed, { dedupliquer: false });
+          const { lead, doublon } = await creerLead(parsed, { dedupliquer: false });
           if (doublon) {
             resultat.ignores++;
           } else {
-            marquerSynchronise(lead.id, page.id, page.last_edited_time);
+            await marquerSynchronise(lead.id, page.id, page.last_edited_time);
             resultat.crees++;
           }
           continue;
@@ -192,21 +193,21 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
         }
 
         const parsed = schemaLeadInput.partial().parse(patch);
-        mettreAJourLead(existant.id, parsed);
-        marquerSynchronise(existant.id, page.id, page.last_edited_time);
+        await mettreAJourLead(existant.id, parsed);
+        await marquerSynchronise(existant.id, page.id, page.last_edited_time);
         resultat.maj++;
       } catch (err) {
         resultat.erreurs.push(`Page ${page.id} : ${messageErreur(err)}`);
       }
     }
-    ecrireReglages({ notionDernierPull: lanceLe });
+    await ecrireReglages({ notionDernierPull: lanceLe });
   } catch (err) {
     resultat.succes = false;
     resultat.erreurs.push(messageErreur(err));
   }
 
   resultat.dureeMs = Date.now() - debut;
-  journaliser(resultat);
+  await journaliser(resultat);
   return resultat;
 }
 
@@ -221,19 +222,23 @@ export async function pushVersNotion(): Promise<ResultatSync> {
   try {
     const notion = getNotion();
     const { dataSourceId } = await resoudreCible();
-    for (const lead of leadsAPousser()) {
+    for (const lead of await leadsAPousser()) {
       try {
         const properties = versProprietesNotion(lead) as never;
         if (lead.notionPageId) {
           const page = await notion.pages.update({ page_id: lead.notionPageId, properties });
-          marquerSynchronise(lead.id, lead.notionPageId, (page as { last_edited_time: string }).last_edited_time);
+          await marquerSynchronise(
+            lead.id,
+            lead.notionPageId,
+            (page as { last_edited_time: string }).last_edited_time,
+          );
           resultat.maj++;
         } else {
           const page = await notion.pages.create({
             parent: { type: 'data_source_id', data_source_id: dataSourceId },
             properties,
           });
-          marquerSynchronise(lead.id, page.id, (page as { last_edited_time: string }).last_edited_time);
+          await marquerSynchronise(lead.id, page.id, (page as { last_edited_time: string }).last_edited_time);
           resultat.crees++;
         }
       } catch (err) {
@@ -246,7 +251,7 @@ export async function pushVersNotion(): Promise<ResultatSync> {
   }
 
   resultat.dureeMs = Date.now() - debut;
-  journaliser(resultat);
+  await journaliser(resultat);
   return resultat;
 }
 
@@ -276,44 +281,55 @@ export interface EtatNotion {
   derniersRuns: ResultatSync[];
 }
 
-export function etatNotion(): EtatNotion {
-  const reglages = lireReglages();
+export async function etatNotion(): Promise<EtatNotion> {
+  const reglages = await lireReglages();
   return {
     configure: notionEstConfigure(),
     databaseId: process.env.NOTION_DATABASE_ID ?? reglages.notionDatabaseId,
     dataSourceId: reglages.notionDataSourceId,
     dernierPull: reglages.notionDernierPull,
-    enAttenteDePush: notionEstConfigure() ? leadsAPousser().length : 0,
-    derniersRuns: lireJournal(5),
+    enAttenteDePush: notionEstConfigure() ? (await leadsAPousser()).length : 0,
+    derniersRuns: await lireJournal(5),
   };
 }
 
-function journaliser(r: ResultatSync): void {
-  getDb()
-    .prepare(
-      `INSERT INTO journal_sync (id, lance_le, direction, crees, maj, ignores, erreurs, duree_ms, succes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(nouvelId(), r.lanceLe, r.direction, r.crees, r.maj, r.ignores, JSON.stringify(r.erreurs), r.dureeMs, r.succes ? 1 : 0);
+async function journaliser(r: ResultatSync): Promise<void> {
+  const db = await getDb();
+  await db.run(
+    `INSERT INTO journal_sync (id, lance_le, direction, crees, maj, ignores, erreurs, duree_ms, succes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [nouvelId(), r.lanceLe, r.direction, r.crees, r.maj, r.ignores, JSON.stringify(r.erreurs), r.dureeMs, r.succes ? 1 : 0],
+  );
 }
 
-export function lireJournal(limite = 20): ResultatSync[] {
-  return getDb()
-    .prepare<[number], {
-      lance_le: string; direction: string; crees: number; maj: number;
-      ignores: number; erreurs: string; duree_ms: number; succes: number;
-    }>('SELECT * FROM journal_sync ORDER BY lance_le DESC LIMIT ?')
-    .all(limite)
-    .map((l) => ({
-      succes: l.succes === 1,
-      direction: l.direction as ResultatSync['direction'],
-      crees: l.crees,
-      maj: l.maj,
-      ignores: l.ignores,
-      erreurs: JSON.parse(l.erreurs) as string[],
-      dureeMs: l.duree_ms,
-      lanceLe: l.lance_le,
-    }));
+interface LigneJournal {
+  lance_le: string;
+  direction: string;
+  crees: number;
+  maj: number;
+  ignores: number;
+  erreurs: string;
+  duree_ms: number;
+  // SQLite renvoie 0/1, PostgreSQL renvoie un booléen natif.
+  succes: number | boolean;
+}
+
+export async function lireJournal(limite = 20): Promise<ResultatSync[]> {
+  const db = await getDb();
+  const lignes = await db.all<LigneJournal>(
+    'SELECT * FROM journal_sync ORDER BY lance_le DESC LIMIT ?',
+    [limite],
+  );
+  return lignes.map((l) => ({
+    succes: Boolean(l.succes),
+    direction: l.direction as ResultatSync['direction'],
+    crees: l.crees,
+    maj: l.maj,
+    ignores: l.ignores,
+    erreurs: JSON.parse(l.erreurs) as string[],
+    dureeMs: l.duree_ms,
+    lanceLe: l.lance_le,
+  }));
 }
 
 function messageErreur(err: unknown): string {

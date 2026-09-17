@@ -27,9 +27,9 @@ export const REGLAGES_DEFAUT: Reglages = {
   notionDernierPull: null,
 };
 
-export function lireReglages(): Reglages {
-  const db = getDb();
-  const lignes = db.prepare<[], { cle: string; valeur: string }>('SELECT cle, valeur FROM reglages').all();
+export async function lireReglages(): Promise<Reglages> {
+  const db = await getDb();
+  const lignes = await db.all<{ cle: string; valeur: string }>('SELECT cle, valeur FROM reglages');
   const out: Record<string, unknown> = { ...REGLAGES_DEFAUT };
   for (const ligne of lignes) {
     try {
@@ -43,19 +43,19 @@ export function lireReglages(): Reglages {
   return reglages;
 }
 
-export function ecrireReglages(patch: Partial<Reglages>): Reglages {
-  const db = getDb();
-  const stmt = db.prepare(
-    `INSERT INTO reglages (cle, valeur, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur, updated_at = excluded.updated_at`,
-  );
+export async function ecrireReglages(patch: Partial<Reglages>): Promise<Reglages> {
+  const db = await getDb();
   const now = maintenantIso();
-  db.transaction(() => {
+  await db.transaction(async (tx) => {
     for (const [cle, valeur] of Object.entries(patch)) {
       if (valeur === undefined) continue;
-      stmt.run(cle, JSON.stringify(valeur), now);
+      await tx.run(
+        `INSERT INTO reglages (cle, valeur, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur, updated_at = excluded.updated_at`,
+        [cle, JSON.stringify(valeur), now],
+      );
     }
-  })();
+  });
   return lireReglages();
 }
 
@@ -80,32 +80,27 @@ function versObjectif(ligne: LigneObjectif): Objectif {
 }
 
 /** Objectif d'une période — crée l'objectif par défaut s'il n'existe pas encore. */
-export function lireObjectif(periode: string): Objectif {
+export async function lireObjectif(periode: string): Promise<Objectif> {
   if (!estIdPeriodeValide(periode)) throw new Error(`Période invalide : ${periode}`);
-  const db = getDb();
-  const ligne = db
-    .prepare<[string], LigneObjectif>('SELECT * FROM objectifs WHERE periode = ?')
-    .get(periode);
+  const db = await getDb();
+  const ligne = await db.get<LigneObjectif>('SELECT * FROM objectifs WHERE periode = ?', [periode]);
   if (ligne) return versObjectif(ligne);
   return { periode, ...OBJECTIF_DEFAUT };
 }
 
-export function lireTousObjectifs(): Objectif[] {
-  const db = getDb();
-  return db
-    .prepare<[], LigneObjectif>('SELECT * FROM objectifs ORDER BY periode DESC')
-    .all()
-    .map(versObjectif);
+export async function lireTousObjectifs(): Promise<Objectif[]> {
+  const db = await getDb();
+  const lignes = await db.all<LigneObjectif>('SELECT * FROM objectifs ORDER BY periode DESC');
+  return lignes.map(versObjectif);
 }
 
-export function ecrireObjectif(objectif: Objectif): Objectif {
+export async function ecrireObjectif(objectif: Objectif): Promise<Objectif> {
   if (!estIdPeriodeValide(objectif.periode)) throw new Error(`Période invalide : ${objectif.periode}`);
-  const db = getDb();
-  db.prepare(
+  const db = await getDb();
+  await db.run(
     `INSERT INTO objectifs (periode, cible_points, paliers_points, paliers_activation,
         prime_par_opportunite_supplementaire, cible_activation, updated_at)
-     VALUES (@periode, @ciblePoints, @paliersPoints, @paliersActivation,
-        @primeParOpportuniteSupplementaire, @cibleActivation, @updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(periode) DO UPDATE SET
         cible_points = excluded.cible_points,
         paliers_points = excluded.paliers_points,
@@ -113,14 +108,15 @@ export function ecrireObjectif(objectif: Objectif): Objectif {
         prime_par_opportunite_supplementaire = excluded.prime_par_opportunite_supplementaire,
         cible_activation = excluded.cible_activation,
         updated_at = excluded.updated_at`,
-  ).run({
-    periode: objectif.periode,
-    ciblePoints: objectif.ciblePoints,
-    paliersPoints: JSON.stringify(objectif.paliersPoints),
-    paliersActivation: JSON.stringify(objectif.paliersActivation),
-    primeParOpportuniteSupplementaire: objectif.primeParOpportuniteSupplementaire,
-    cibleActivation: objectif.cibleActivation,
-    updatedAt: maintenantIso(),
-  });
+    [
+      objectif.periode,
+      objectif.ciblePoints,
+      JSON.stringify(objectif.paliersPoints),
+      JSON.stringify(objectif.paliersActivation),
+      objectif.primeParOpportuniteSupplementaire,
+      objectif.cibleActivation,
+      maintenantIso(),
+    ],
+  );
   return lireObjectif(objectif.periode);
 }

@@ -74,17 +74,19 @@ export async function POST(request: Request) {
       erreurs: [...erreursParsing],
     };
 
-    entrees.forEach((entree, index) => {
+    // `for…of` + `await` (et non `forEach`) : chaque création doit attendre son tour
+    // pour que `rapport` reflète fidèlement le résultat une fois la boucle terminée.
+    for (const [index, entree] of entrees.entries()) {
       try {
         const parsed = schemaLeadInput.parse(entree);
-        const { doublon } = creerLead(parsed, { dedupliquer: true });
+        const { doublon } = await creerLead(parsed, { dedupliquer: true });
         if (doublon) rapport.doublons++;
         else rapport.crees++;
       } catch (err) {
         rapport.rejetes++;
         rapport.erreurs.push({ ligne: index + 1, message: messageErreur(err) });
       }
-    });
+    }
 
     return ok(rapport);
   } catch (err) {

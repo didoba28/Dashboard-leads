@@ -79,7 +79,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const filtres = filtresDepuisUrl(url);
-    const leads = listerTousLeads(filtres);
+    const leads = await listerTousLeads(filtres);
     const csv = genererCsv(leads.map(ligneExport), ENTETES_EXPORT);
     const suffixe = filtres.periode ?? aujourdHui();
 

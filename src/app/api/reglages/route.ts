@@ -16,7 +16,7 @@ const schema = z
 
 export async function GET() {
   try {
-    return ok(lireReglages());
+    return ok(await lireReglages());
   } catch (err) {
     return gererErreur(err);
   }
@@ -25,12 +25,12 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const patch = schema.parse(await request.json());
-    const avant = lireReglages();
-    const reglages = ecrireReglages(patch);
+    const avant = await lireReglages();
+    const reglages = await ecrireReglages(patch);
     // Changer l'arbitrage change la valeur des leads déjà en base : on recalcule.
     const rescored =
       patch.arbitrageB2cNewsletter && patch.arbitrageB2cNewsletter !== avant.arbitrageB2cNewsletter
-        ? rescorerTout()
+        ? await rescorerTout()
         : 0;
     return ok({ reglages, leadsRescores: rescored });
   } catch (err) {

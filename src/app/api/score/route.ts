@@ -17,7 +17,8 @@ const schema = z.object({
 export async function POST(request: Request) {
   try {
     const entree = schema.parse(await request.json());
-    return ok(scorerLead(entree, { arbitrageB2cNewsletter: lireReglages().arbitrageB2cNewsletter }));
+    const reglages = await lireReglages();
+    return ok(scorerLead(entree, { arbitrageB2cNewsletter: reglages.arbitrageB2cNewsletter }));
   } catch (err) {
     return gererErreur(err);
   }

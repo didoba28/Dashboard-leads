@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     });
 
     const parsed = schemaLeadInput.parse(lead);
-    const { lead: leadCree, doublon } = creerLead(parsed, { dedupliquer: true });
+    const { lead: leadCree, doublon } = await creerLead(parsed, { dedupliquer: true });
 
     return ok({ cree: !doublon, doublon, lead: leadCree, retry });
   } catch (err) {
