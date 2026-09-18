@@ -47,7 +47,7 @@ export default function PageCompte() {
   return (
     <section className="max-w-xl rounded-xl border border-hair bg-surface p-6 shadow-sm">
       <h1 className="text-xl font-semibold text-ink">Mon compte</h1>
-      <p className="mt-2 text-sm text-ink-2">Changez votre mot de passe temporaire après votre première connexion. Utilisez un mot de passe unique, conservé dans un gestionnaire de mots de passe.</p>
+      <p className="mt-2 text-sm text-ink-2">Vous pouvez remplacer votre mot de passe ici. Pour une meilleure protection, utilisez un mot de passe long et propre à votre compte.</p>
       <form onSubmit={changerMotDePasse} className="mt-6 space-y-4">
         <div>
           <label className="block text-sm text-ink-2" htmlFor="actuel">Mot de passe actuel</label>
