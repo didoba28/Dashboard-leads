@@ -10,3 +10,4 @@ enable_anonymous_sign_ins = false
 # Active le fournisseur e-mail pour les comptes créés par un administrateur.
 # L'interdiction des inscriptions publiques reste définie par [auth].enable_signup.
 enable_signup = true
+secure_password_change = true

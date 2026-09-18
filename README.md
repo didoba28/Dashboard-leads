@@ -137,7 +137,7 @@ Chaque accès est vérifié. Le **jeton d'ingestion**
 (`INGEST_TOKEN`, en `Authorization: Bearer`) couvre l'ingestion e-mail et
 formulaire. Le webhook Webflow utilise une signature HMAC. La **clé d'API**
 (`API_KEY`, en `Authorization: Bearer`) couvre la lecture et l'écriture par des outils tiers. Les personnes passent
-par Supabase Auth : adresse autorisée, lien e-mail puis code TOTP. En
+par Supabase Auth : adresse autorisée, mot de passe individuel puis code TOTP. En
 production, une configuration Auth incomplète ferme les pages et l'API sans clé.
 
 | Méthode | Chemin | Rôle | Authentification |

@@ -12,6 +12,7 @@ const LIENS = [
   { href: '/objectifs', label: 'Objectifs & primes', icone: '◎' },
   { href: '/regles', label: 'Règles de comptage', icone: '§' },
   { href: '/integrations', label: 'Intégrations', icone: '⇄' },
+  { href: '/compte', label: 'Mon compte', icone: '●' },
 ] as const;
 
 export function Navigation({ orientation = 'verticale' }: { orientation?: 'verticale' | 'horizontale' }) {
