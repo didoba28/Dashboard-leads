@@ -55,15 +55,22 @@ désactivez pas la vérification TLS pour résoudre une erreur de certificat.
 
 Le projet Supabase sert également à l'authentification du dashboard :
 
-1. Activez l'authentification par e-mail et désactivez l'inscription publique
-   dans **Authentication → Providers → Email**. Invitez ou créez chaque compte
-   autorisé dans **Authentication → Users**.
+1. Gardez le fournisseur e-mail activé et désactivez les inscriptions publiques
+   au niveau global de Supabase Auth (`auth.enable_signup = false`). Ne
+   désactivez pas `auth.email.enable_signup` : cela bloque aussi la connexion
+   par lien e-mail des comptes existants. Créez chaque compte autorisé dans
+   **Authentication → Users**.
 2. Renseignez l'URL du dashboard dans la configuration des URL Auth de Supabase,
    avec `https://VOTRE-DOMAINE/auth/callback` comme URL de redirection admise.
 3. Définissez `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    et `DASHBOARD_ALLOWED_EMAILS` (adresses exactes séparées par des virgules).
 4. Chaque personne reçoit un lien e-mail et doit configurer puis saisir un
    code TOTP. L'accès aux pages et aux API attend une session de niveau `aal2`.
+
+Pour un usage réel, configurez un [serveur SMTP dédié](https://supabase.com/docs/guides/auth/auth-smtp)
+dans Supabase Auth. Le service e-mail gratuit de Supabase limite l'envoi aux
+membres de l'organisation, avec un quota réduit. Ne donnez pas un accès à
+l'organisation Supabase uniquement pour permettre la réception d'un lien.
 
 La clé publiable est visible dans le navigateur par conception. La migration
 `002_verrouillage_rls` active RLS et retire les droits `anon` et

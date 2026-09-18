@@ -7,4 +7,6 @@ enable_signup = false
 enable_anonymous_sign_ins = false
 
 [auth.email]
-enable_signup = false
+# Active le fournisseur e-mail pour les comptes créés par un administrateur.
+# L'interdiction des inscriptions publiques reste définie par [auth].enable_signup.
+enable_signup = true
