@@ -30,5 +30,5 @@ export async function POST(request: Request) {
     });
     if (error) console.error('[auth] Envoi du lien impossible :', error.message);
   }
-  return NextResponse.json({ message: 'Si cette adresse est autorisée, un lien de connexion lui a été envoyé.' });
+  return NextResponse.json({ message: 'Si cette adresse est autorisée, un lien de connexion lui a été envoyé. Ouvrez-le dans ce même navigateur.' });
 }

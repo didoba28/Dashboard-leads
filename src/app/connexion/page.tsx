@@ -29,7 +29,7 @@ export default function PageConnexion() {
   return (
     <section className="mx-auto mt-12 max-w-md rounded-xl border border-hair bg-surface p-6 shadow-sm">
       <h1 className="text-xl font-semibold text-ink">Connexion au dashboard</h1>
-      <p className="mt-2 text-sm text-ink-2">Saisissez votre adresse autorisée. Un lien de connexion vous sera envoyé, puis un code de votre application d’authentification sera demandé.</p>
+      <p className="mt-2 text-sm text-ink-2">Saisissez votre adresse autorisée. Ouvrez le lien reçu dans ce même navigateur, puis saisissez le code de votre application d’authentification.</p>
       <form onSubmit={envoyer} className="mt-6 space-y-4">
         <label className="block text-sm text-ink-2" htmlFor="email">Adresse e-mail</label>
         <input id="email" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-lg border border-hair bg-surface px-3 py-2 text-ink" />
