@@ -8,9 +8,11 @@ import type { ResultatScoring } from '@/lib/domain/scoring';
 export function AperçuScore({
   score,
   pointsForces,
+  enAttente = false,
 }: {
   score: ResultatScoring;
   pointsForces?: number | null;
+  enAttente?: boolean;
 }) {
   const effectifs = pointsForces ?? score.points;
   const force = pointsForces != null && pointsForces !== score.points;
@@ -20,7 +22,7 @@ export function AperçuScore({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-            Score appliqué
+            {enAttente ? 'Points proposés' : 'Score appliqué'}
           </p>
           <p className="mt-1 flex items-baseline gap-1.5">
             <span className="text-2xl font-semibold tracking-tight text-ink">
@@ -42,6 +44,11 @@ export function AperçuScore({
       <p className="mt-2 border-t border-hair pt-2 text-xs text-ink-2">
         <strong className="font-medium text-ink">{score.regleLabel}</strong> — {score.explication}
       </p>
+      {enAttente ? (
+        <p className="mt-1 text-xs font-medium text-[var(--warning)]">
+          Ces points ne comptent pas dans le dashboard avant votre confirmation.
+        </p>
+      ) : null}
       {force ? (
         <p className="mt-1 text-xs text-ink-muted">
           Le calcul automatique donnait {formaterPoints(score.points)} point

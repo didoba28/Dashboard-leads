@@ -3,8 +3,7 @@ import { NextResponse } from 'next/server';
 import { filtresDepuisUrl, gererErreur } from '@/lib/api/http';
 import { genererCsv, type EnteteExportCsv } from '@/lib/csv';
 import { listerTousLeads } from '@/lib/db/leads';
-import { aujourdHui, type Lead } from '@/lib/domain/lead';
-import { pointsEffectifs } from '@/lib/domain/scoring';
+import { aujourdHui, pointsDuLead, pointsProposesDuLead, type Lead } from '@/lib/domain/lead';
 import {
   LABELS_INITIATIVE,
   LABELS_RELATION,
@@ -38,6 +37,10 @@ const ENTETES_EXPORT: EnteteExportCsv[] = [
   { cle: 'proprietaire', label: 'Propriétaire' },
   { cle: 'tags', label: 'Tags' },
   { cle: 'points', label: 'Points' },
+  { cle: 'pointsProposes', label: 'Points proposés' },
+  { cle: 'pointsConfirmes', label: 'Points confirmés' },
+  { cle: 'pointsConfirmesLe', label: 'Date de confirmation' },
+  { cle: 'pointsConfirmesPar', label: 'Confirmé par' },
   { cle: 'pointsOverride', label: 'Points forcés' },
   { cle: 'eligible', label: 'Lead entrant' },
   { cle: 'eligibleActivation', label: 'Compte en activation' },
@@ -66,7 +69,11 @@ function ligneExport(lead: Lead): Record<string, unknown> {
     dateActivation: lead.dateActivation,
     proprietaire: lead.proprietaire,
     tags: lead.tags.join(', '),
-    points: pointsEffectifs({ points: lead.points, pointsOverride: lead.pointsOverride }),
+    points: pointsDuLead(lead),
+    pointsProposes: pointsProposesDuLead(lead),
+    pointsConfirmes: lead.pointsConfirmes,
+    pointsConfirmesLe: lead.pointsConfirmesLe,
+    pointsConfirmesPar: lead.pointsConfirmesPar,
     pointsOverride: lead.pointsOverride,
     eligible: lead.eligible,
     eligibleActivation: lead.eligibleActivation,

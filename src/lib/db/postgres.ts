@@ -125,6 +125,16 @@ const MIGRATIONS_POSTGRES: Migration[] = [
       END $$;
     `,
   },
+  {
+    nom: '003_confirmation_points',
+    sql: `
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS validation_requise BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS points_confirmes BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS points_confirmes_le TEXT;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS points_confirmes_par TEXT;
+      CREATE INDEX IF NOT EXISTS idx_leads_confirmation ON leads(points_confirmes, date_reception);
+    `,
+  },
 ];
 
 /** Traduit les marqueurs positionnels `?` (convention commune, voir types.ts) en `$1, $2, …`. */

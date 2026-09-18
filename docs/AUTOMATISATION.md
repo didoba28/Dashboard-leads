@@ -182,12 +182,19 @@ Content-Type: application/json
 Réponse : les points, l'éligibilité à l'activation, et la règle appliquée avec
 son explication. Un seul endroit décide, et il sait dire pourquoi.
 
-### Forcer une valeur
+### Valider les points dans le dashboard
 
-En dernier recours, `"pointsForces": 0.5` avec `"raisonPointsForces": "…"`
-impose une valeur. Elle apparaît dans le dashboard comme arbitrage manuel,
-distincte du calcul automatique, et la raison est conservée. À réserver aux cas
-que la règle ne sait pas trancher.
+Chaque lead reçu par une automatisation est créé avec des **points proposés**.
+Les détails d'origine, y compris les champs supplémentaires transmis par Make,
+restent visibles dans sa fiche. Ouvrez **Leads → Points à confirmer**, vérifiez
+les informations et, si nécessaire, corrigez les dimensions ou choisissez
+« Points forcés ». Cliquez ensuite sur **Enregistrer et confirmer les points**.
+Avant cette confirmation, le lead reste visible, mais ses points et éventuelles
+opportunités ne comptent pas dans les objectifs et primes.
+
+`"pointsForces": 0.5` et `"raisonPointsForces": "…"` envoyés par Make sont
+conservés dans les détails d'origine comme suggestion ; ils ne valident ni ne
+forcent les points automatiquement.
 
 ### Envoyer un lot
 

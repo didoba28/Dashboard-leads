@@ -50,6 +50,10 @@ interface LigneLead {
   explication: string;
   points_override: number | null;
   points_override_raison: string | null;
+  validation_requise: number | boolean;
+  points_confirmes: number | boolean;
+  points_confirmes_le: string | null;
+  points_confirmes_par: string | null;
   a_verifier: number | boolean;
   confiance: number | null;
   dedupe_key: string | null;
@@ -91,6 +95,10 @@ function versLead(l: LigneLead): Lead {
     explication: l.explication,
     pointsOverride: l.points_override,
     pointsOverrideRaison: l.points_override_raison,
+    validationRequise: Boolean(l.validation_requise),
+    pointsConfirmes: Boolean(l.points_confirmes),
+    pointsConfirmesLe: l.points_confirmes_le,
+    pointsConfirmesPar: l.points_confirmes_par,
     aVerifier: Boolean(l.a_verifier),
     confiance: l.confiance,
     dedupeKey: l.dedupe_key,
@@ -113,7 +121,8 @@ function parseJson<T>(brut: string, defaut: T): T {
 const COLONNES = `id, date_reception, nom, email, telephone, societe, fonction, ville, segment,
   relation, type_demande, initiative, source_collecte, campagne, lead_magnet, message, statut,
   type_activation, date_activation, proprietaire, tags, eligible, points, eligible_activation,
-  regle_id, regle_label, explication, points_override, points_override_raison, a_verifier,
+  regle_id, regle_label, explication, points_override, points_override_raison,
+  validation_requise, points_confirmes, points_confirmes_le, points_confirmes_par, a_verifier,
   confiance, dedupe_key, notion_page_id, notion_last_synced_at, raw_payload, created_at, updated_at`;
 
 export interface FiltresLeads {
@@ -128,6 +137,7 @@ export interface FiltresLeads {
   statut?: Statut[];
   eligible?: boolean;
   aVerifier?: boolean;
+  pointsConfirmes?: boolean;
   proprietaire?: string;
   /** Recherche plein texte simple sur nom, e-mail, société, message. */
   q?: string;
@@ -183,6 +193,10 @@ function construireWhere(f: FiltresLeads): ClauseWhere {
   if (f.aVerifier !== undefined) {
     conditions.push('a_verifier = ?');
     params.push(f.aVerifier ? 1 : 0);
+  }
+  if (f.pointsConfirmes !== undefined) {
+    conditions.push('points_confirmes = ?');
+    params.push(f.pointsConfirmes ? 1 : 0);
   }
   if (f.proprietaire) {
     conditions.push('proprietaire = ?');
@@ -296,6 +310,8 @@ export interface OptionsCreation {
   dedupliquer?: boolean;
   /** Force l'identifiant (import, resynchronisation Notion). */
   id?: string;
+  /** Les leads des automatisations attendent une confirmation humaine avant de compter. */
+  validationRequise?: boolean;
 }
 
 export interface ResultatCreation {
@@ -357,6 +373,8 @@ export async function creerLead(
     score.explication,
     input.pointsOverride ?? null,
     input.pointsOverrideRaison ?? null,
+    options.validationRequise ? 1 : 0,
+    options.validationRequise ? 0 : 1,
     input.aVerifier ? 1 : 0,
     input.confiance ?? null,
     dedupeKey,
@@ -371,13 +389,14 @@ export async function creerLead(
       id, date_reception, nom, email, telephone, societe, fonction, ville, segment, relation,
       type_demande, initiative, source_collecte, campagne, lead_magnet, message, statut,
       type_activation, date_activation, proprietaire, tags, eligible, points, eligible_activation,
-      regle_id, regle_label, explication, points_override, points_override_raison, a_verifier,
+      regle_id, regle_label, explication, points_override, points_override_raison,
+      validation_requise, points_confirmes, a_verifier,
       confiance, dedupe_key, notion_page_id, notion_last_synced_at, raw_payload, created_at, updated_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, NULL, ?, ?, ?
     )`,
     params,
@@ -474,6 +493,13 @@ export async function mettreAJourLead(
     score.explication,
   );
 
+  const scoreModifie = (['segment', 'relation', 'typeDemande', 'initiative', 'pointsOverride'] as const)
+    .some((cle) => patch[cle] !== undefined && patch[cle] !== actuel[cle]);
+  if (actuel.validationRequise && scoreModifie) {
+    assignations.push('points_confirmes = ?', 'points_confirmes_le = NULL', 'points_confirmes_par = NULL');
+    params.push(0);
+  }
+
   // La clé de dédup suit l'identité et la ressource.
   const dedupeKey = calculerDedupeKey({
     email: patch.email !== undefined ? patch.email : actuel.email,
@@ -496,6 +522,19 @@ export async function mettreAJourLead(
   params.push(id);
   await db.run(`UPDATE leads SET ${assignations.join(', ')} WHERE id = ?`, params);
   return lireLead(id);
+}
+
+/** Confirme le score actuellement proposé, sans accepter de score depuis le client. */
+export async function confirmerPointsLead(id: string, email: string): Promise<Lead | null> {
+  const db = await getDb();
+  const maintenant = maintenantIso();
+  const resultat = await db.run(
+    `UPDATE leads SET points_confirmes = ?, points_confirmes_le = ?,
+       points_confirmes_par = ?, updated_at = ?
+     WHERE id = ? AND deleted_at IS NULL AND validation_requise = ? AND points_confirmes = ?`,
+    [1, maintenant, email, maintenant, id, 1, 0],
+  );
+  return resultat.changes > 0 ? lireLead(id) : null;
 }
 
 export async function marquerSynchronise(
@@ -550,9 +589,15 @@ export async function rescorerTout(): Promise<number> {
       ) {
         continue;
       }
+      const confirmationAReprendre = lead.validationRequise && (
+        score.points !== lead.points ||
+        score.eligible !== lead.eligible ||
+        score.eligibleActivation !== lead.eligibleActivation
+      );
       await tx.run(
         `UPDATE leads SET eligible = ?, points = ?, eligible_activation = ?, regle_id = ?,
-           regle_label = ?, explication = ?, updated_at = ? WHERE id = ?`,
+           regle_label = ?, explication = ?, points_confirmes = ?, points_confirmes_le = ?,
+           points_confirmes_par = ?, updated_at = ? WHERE id = ?`,
         [
           score.eligible ? 1 : 0,
           score.points,
@@ -560,6 +605,9 @@ export async function rescorerTout(): Promise<number> {
           score.regleId,
           score.regleLabel,
           score.explication,
+          confirmationAReprendre ? 0 : (lead.pointsConfirmes ? 1 : 0),
+          confirmationAReprendre ? null : lead.pointsConfirmesLe,
+          confirmationAReprendre ? null : lead.pointsConfirmesPar,
           now,
           lead.id,
         ],

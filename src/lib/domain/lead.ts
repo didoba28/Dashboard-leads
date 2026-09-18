@@ -60,6 +60,12 @@ export interface Lead {
   pointsOverride: number | null;
   pointsOverrideRaison: string | null;
 
+  /** Une automatisation propose un score ; seul un utilisateur connecté le confirme. */
+  validationRequise: boolean;
+  pointsConfirmes: boolean;
+  pointsConfirmesLe: string | null;
+  pointsConfirmesPar: string | null;
+
   /** Le lead demande une relecture humaine (classification automatique incertaine). */
   aVerifier: boolean;
   confiance: number | null;
@@ -143,13 +149,18 @@ export type LeadPatch = z.input<typeof schemaLeadPatch>;
 
 /** Un lead compte-t-il comme opportunité activée / réactivée par l'inbound ? */
 export function estOpportuniteInbound(lead: Lead): boolean {
-  return lead.eligible && lead.eligibleActivation && STATUTS_OPPORTUNITE.includes(lead.statut);
+  return lead.pointsConfirmes && lead.eligible && lead.eligibleActivation && STATUTS_OPPORTUNITE.includes(lead.statut);
 }
 
-/** Points réellement comptabilisés (override manuel prioritaire). */
-export function pointsDuLead(lead: Lead): number {
+/** Score proposé avant confirmation, avec arbitrage manuel éventuel. */
+export function pointsProposesDuLead(lead: Lead): number {
   if (!lead.eligible && lead.pointsOverride == null) return 0;
   return lead.pointsOverride ?? lead.points;
+}
+
+/** Seuls les points confirmés entrent dans les objectifs et les primes. */
+export function pointsDuLead(lead: Lead): number {
+  return lead.pointsConfirmes ? pointsProposesDuLead(lead) : 0;
 }
 
 /**

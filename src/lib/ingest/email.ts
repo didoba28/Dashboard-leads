@@ -18,6 +18,7 @@ export const schemaEmailEntrant = z
     recuLe: z.string().trim().nullable().optional(),
     messageId: z.string().trim().nullable().optional(),
   })
+  .passthrough()
   .refine(
     (v) => Boolean(v.corpsTexte?.trim()) || Boolean(v.corpsHtml?.trim()) || Boolean(v.sujet?.trim()),
     { message: 'Au moins un des champs sujet, corpsTexte ou corpsHtml doit être renseigné.' },
@@ -91,6 +92,7 @@ export function leadDepuisEmail(entree: EmailEntrant): LeadInput {
       sujet: entree.sujet ?? null,
       expediteur: entree.expediteur ?? null,
       messageId: entree.messageId ?? null,
+      donnees: entree,
     },
   };
 }

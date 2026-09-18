@@ -50,7 +50,10 @@ Liste filtrable et triable de tous les leads (recherche plein texte, segment,
 statut, type de demande, initiative, « à vérifier »…). Permet la création et
 la modification manuelle d'un lead, l'import CSV et l'export CSV filtré. C'est
 aussi là que se règle l'arbitrage manuel des points (« points forcés » et leur
-raison) sur un lead donné.
+raison) sur un lead donné. Les leads reçus par les automatisations affichent
+leurs détails d'origine et une proposition de points. Ils restent dans le filtre
+« Points à confirmer » et ne comptent dans les objectifs qu'après validation
+par une personne connectée.
 
 ### Objectifs & primes (`/objectifs`)
 

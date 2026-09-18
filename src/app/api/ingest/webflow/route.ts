@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     const payload: unknown = JSON.parse(corpsBrut);
     const entree = schemaWebflow.parse(payload);
     const parsed = schemaLeadInput.parse(leadDepuisWebflow(entree));
-    const { lead, doublon } = await creerLead(parsed, { dedupliquer: true });
+    const { lead, doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
 
     return ok({ cree: !doublon, doublon, lead }, { status: doublon ? 200 : 201 });
   } catch (err) {

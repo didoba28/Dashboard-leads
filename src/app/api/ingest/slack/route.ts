@@ -56,12 +56,13 @@ export async function POST(request: Request) {
     const lead = leadDepuisMessageSlack({
       texte: event.text ?? '',
       blocs: event.blocks,
+      evenement: event,
       ts: event.ts ?? String(Date.now() / 1000),
       canal: event.channel ?? 'inconnu',
     });
 
     const parsed = schemaLeadInput.parse(lead);
-    const { lead: leadCree, doublon } = await creerLead(parsed, { dedupliquer: true });
+    const { lead: leadCree, doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
 
     return ok({ cree: !doublon, doublon, lead: leadCree, retry });
   } catch (err) {

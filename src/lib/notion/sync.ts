@@ -171,7 +171,7 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
             sourceCollecte: patch.sourceCollecte ?? 'notion',
             notionPageId: page.id,
           });
-          const { lead, doublon } = await creerLead(parsed, { dedupliquer: false });
+          const { lead, doublon } = await creerLead(parsed, { dedupliquer: false, validationRequise: true });
           if (doublon) {
             resultat.ignores++;
           } else {

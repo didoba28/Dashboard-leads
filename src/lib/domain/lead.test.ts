@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculerDedupeKey, pointsDuLead, schemaLeadInput, type Lead } from './lead';
+import { calculerDedupeKey, pointsDuLead, pointsProposesDuLead, schemaLeadInput, type Lead } from './lead';
 
 const leadBase: Lead = {
   id: 'l1',
@@ -31,6 +31,10 @@ const leadBase: Lead = {
   explication: '',
   pointsOverride: null,
   pointsOverrideRaison: null,
+  validationRequise: false,
+  pointsConfirmes: true,
+  pointsConfirmesLe: null,
+  pointsConfirmesPar: null,
   aVerifier: false,
   confiance: 0.9,
   dedupeKey: null,
@@ -60,6 +64,12 @@ describe('pointsDuLead', () => {
 
   it('permet de rattraper manuellement un lead jugé non éligible', () => {
     expect(pointsDuLead({ ...leadBase, eligible: false, points: 0, pointsOverride: 1 })).toBe(1);
+  });
+
+  it('ne comptabilise pas une proposition tant qu’elle n’est pas confirmée', () => {
+    const enAttente = { ...leadBase, validationRequise: true, pointsConfirmes: false };
+    expect(pointsProposesDuLead(enAttente)).toBe(1);
+    expect(pointsDuLead(enAttente)).toBe(0);
   });
 });
 

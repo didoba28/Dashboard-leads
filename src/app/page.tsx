@@ -1,6 +1,6 @@
 /** Vue d'ensemble : où en est le trimestre, et ce qu'il reste à faire. */
 import { construireStats, periodePrecedente } from '@/lib/analytics';
-import { listerTousLeads } from '@/lib/db/leads';
+import { listerLeads, listerTousLeads } from '@/lib/db/leads';
 import { lireObjectif, lireReglages } from '@/lib/db/settings';
 import { estIdPeriodeValide, periodesAutour } from '@/lib/domain/periods';
 import { BarresRepartition, Entonnoir, GraphiqueHebdo, GraphiqueTrajectoire } from '@/components/charts';
@@ -22,10 +22,11 @@ export default async function PageAccueil({
   const demande = typeof params['periode'] === 'string' ? params['periode'] : null;
   const periode = demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
 
-  const [leads, leadsPeriodePrecedente, objectifPeriode] = await Promise.all([
+  const [leads, leadsPeriodePrecedente, objectifPeriode, attenteConfirmation] = await Promise.all([
     listerTousLeads({ periode }),
     listerTousLeads({ periode: periodePrecedente(periode) }),
     lireObjectif(periode),
+    listerLeads({ pointsConfirmes: false, limite: 1 }),
   ]);
 
   const stats = construireStats({ leads, leadsPeriodePrecedente, objectif: objectifPeriode });
@@ -50,6 +51,22 @@ export default async function PageAccueil({
           actuelle={periode}
         />
       </header>
+
+      {attenteConfirmation.total > 0 ? (
+        <Carte className="flex flex-wrap items-center justify-between gap-3 border-[var(--warning)] px-5 py-4">
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              {attenteConfirmation.total} lead{attenteConfirmation.total > 1 ? 's' : ''} à confirmer
+            </p>
+            <p className="mt-0.5 text-xs text-ink-muted">
+              Consultez les détails reçus et validez les points proposés avant leur prise en compte.
+            </p>
+          </div>
+          <Link href="/leads?periode=toutes&aConfirmer=true" className="text-sm font-medium text-[var(--s1)] underline underline-offset-2">
+            Examiner les leads
+          </Link>
+        </Carte>
+      ) : null}
 
       {kpis.leadsTotal === 0 ? (
         <Carte className="px-5 py-8 text-center">

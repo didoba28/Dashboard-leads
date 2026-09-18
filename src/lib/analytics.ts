@@ -59,6 +59,7 @@ export interface Kpis {
   leadsTotal: number;
   leadsEligibles: number;
   leadsExclus: number;
+  leadsEnAttente: number;
   points: number;
   pointsInbound: number;
   pointsOutbound: number;
@@ -149,6 +150,7 @@ export function calculerKpis(leads: Lead[]): Kpis {
     leadsTotal: leads.length,
     leadsEligibles: 0,
     leadsExclus: 0,
+    leadsEnAttente: 0,
     points: 0,
     pointsInbound: 0,
     pointsOutbound: 0,
@@ -163,7 +165,8 @@ export function calculerKpis(leads: Lead[]): Kpis {
   for (const lead of leads) {
     const points = pointsDuLead(lead);
     kpis.points += points;
-    if (points > 0) kpis.leadsEligibles += 1;
+    if (!lead.pointsConfirmes) kpis.leadsEnAttente += 1;
+    else if (points > 0) kpis.leadsEligibles += 1;
     else kpis.leadsExclus += 1;
     if (INITIATIVES_OUTBOUND.includes(lead.initiative)) kpis.pointsOutbound += points;
     else kpis.pointsInbound += points;
