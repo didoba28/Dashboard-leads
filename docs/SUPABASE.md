@@ -60,13 +60,16 @@ Le projet Supabase sert également à l'authentification du dashboard :
    désactivez pas `auth.email.enable_signup` : cela bloque aussi la connexion
    des comptes existants. Créez chaque compte autorisé avec un mot de passe
    dans **Authentication → Users**.
-2. Renseignez l'URL du dashboard dans la configuration des URL Auth de Supabase,
-   avec `https://VOTRE-DOMAINE/auth/callback` comme URL de redirection admise.
+2. Renseignez l'URL du dashboard dans la configuration des URL Auth de Supabase.
 3. Définissez `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    et `DASHBOARD_ALLOWED_EMAILS` (adresses exactes séparées par des virgules).
-4. Chaque personne se connecte avec son mot de passe et doit configurer puis
-   saisir un code TOTP. L'accès aux pages et aux API attend une session de
-   niveau `aal2`. Le mot de passe peut être remplacé dans **Mon compte**.
+4. Chaque personne choisit son nom et saisit le code d’accès. L'accès aux
+   pages et aux API requiert une session Supabase correspondant à l'une des
+   adresses autorisées. Aucun code TOTP n'est demandé.
+
+Un code court partagé ne permet pas de distinguer les personnes qui le
+connaissent. Remplacez-le par des secrets distincts si l'accès doit être
+attribuable à chaque personne.
 
 Si vous souhaitez rétablir les liens de connexion ou permettre la
 récupération d'un mot de passe par e-mail, configurez un

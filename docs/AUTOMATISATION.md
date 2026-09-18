@@ -235,8 +235,8 @@ un scénario Make hebdomadaire pour recevoir le récapitulatif dans Slack.
 
 Dès que `API_KEY` est définie, les scripts tiers peuvent accéder aux routes de
 lecture et d'écriture avec `Authorization: Bearer VOTRE_API_KEY`. L'interface
-utilise une session Supabase réservée aux adresses autorisées et vérifiée par
-un code TOTP. Une configuration Auth incomplète rend l'interface indisponible en
+utilise une session Supabase réservée aux adresses autorisées. Une configuration
+Auth incomplète rend l'interface indisponible en
 production au lieu d'exposer les données. Le guide complet figure dans
 [`SUPABASE.md`](SUPABASE.md).
 

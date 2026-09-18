@@ -6,7 +6,7 @@ import { BasculeTheme } from '@/components/ui/theme';
 
 export function CadreApplication({ children }: { children: React.ReactNode }) {
   const chemin = usePathname();
-  if (chemin === '/connexion' || chemin === '/mfa' || chemin.startsWith('/auth/')) {
+  if (chemin === '/connexion') {
     return <main className="min-h-screen bg-plan px-4 py-8">{children}</main>;
   }
   return (

@@ -5,7 +5,7 @@ import { clientAuthNavigateur } from '@/lib/auth/browser';
 
 export default function PageConnexion() {
   const [email, setEmail] = useState('');
-  const [motDePasse, setMotDePasse] = useState('');
+  const [code, setCode] = useState('');
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
 
@@ -15,14 +15,14 @@ export default function PageConnexion() {
     setErreur('');
     try {
       const { error } = await clientAuthNavigateur().auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password: motDePasse,
+        email,
+        password: code,
       });
       if (error) {
-        setErreur('Adresse e-mail ou mot de passe incorrect.');
+        setErreur('Personne ou code incorrect.');
         return;
       }
-      window.location.replace('/mfa');
+      window.location.replace('/');
     } catch {
       setErreur('Connexion indisponible. Réessayez.');
     } finally {
@@ -33,15 +33,19 @@ export default function PageConnexion() {
   return (
     <section className="mx-auto mt-12 max-w-md rounded-xl border border-hair bg-surface p-6 shadow-sm">
       <h1 className="text-xl font-semibold text-ink">Connexion au dashboard</h1>
-      <p className="mt-2 text-sm text-ink-2">Connectez-vous avec votre adresse autorisée et votre mot de passe. Le code de votre application d’authentification sera ensuite demandé.</p>
+      <p className="mt-2 text-sm text-ink-2">Choisissez votre nom et saisissez le code d’accès.</p>
       <form onSubmit={connecter} className="mt-6 space-y-4">
         <div>
-          <label className="block text-sm text-ink-2" htmlFor="email">Adresse e-mail</label>
-          <input id="email" type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-hair bg-surface px-3 py-2 text-ink" />
+          <label className="block text-sm text-ink-2" htmlFor="personne">Personne</label>
+          <select id="personne" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-hair bg-surface px-3 py-2 text-ink">
+            <option value="">Choisir…</option>
+            <option value="adel@airfit.co">Adel</option>
+            <option value="mehdi@airfit.co">Mehdi</option>
+          </select>
         </div>
         <div>
-          <label className="block text-sm text-ink-2" htmlFor="mot-de-passe">Mot de passe</label>
-          <input id="mot-de-passe" type="password" required autoComplete="current-password" value={motDePasse} onChange={(event) => setMotDePasse(event.target.value)} className="mt-1 w-full rounded-lg border border-hair bg-surface px-3 py-2 text-ink" />
+          <label className="block text-sm text-ink-2" htmlFor="code">Code d’accès</label>
+          <input id="code" type="password" required autoComplete="current-password" value={code} onChange={(event) => setCode(event.target.value)} className="mt-1 w-full rounded-lg border border-hair bg-surface px-3 py-2 text-ink" />
         </div>
         <button type="submit" disabled={enCours} className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-surface disabled:opacity-50">{enCours ? 'Connexion…' : 'Se connecter'}</button>
       </form>

@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { authConfiguree, emailAutorise } from '@/lib/auth/config';
 
 const ROUTES_EXTERNES = ['/api/ingest/', '/api/cron/'];
-const ROUTES_PUBLIQUES = ['/connexion', '/auth/callback', '/auth/send-link'];
+const ROUTES_PUBLIQUES = ['/connexion'];
 
 function reponseErreurApi(message: string, statut: number) {
   return NextResponse.json({ erreur: message }, { status: statut });
@@ -63,15 +63,14 @@ export async function middleware(request: NextRequest) {
 
   const { data, error } = await supabase.auth.getClaims();
   const identifie = !error && emailAutorise(data?.claims?.email);
-  const facteurVerifie = identifie && data?.claims?.aal === 'aal2';
 
   let resultat: NextResponse;
   if (estPublic) {
-    resultat = chemin === '/connexion' && facteurVerifie ? cheminRedirection(request, '/') : reponse;
+    resultat = chemin === '/connexion' && identifie ? cheminRedirection(request, '/') : reponse;
   } else if (!identifie) {
     resultat = estApi ? reponseErreurApi('Connexion requise.', 401) : cheminRedirection(request, '/connexion');
-  } else if (!facteurVerifie && chemin !== '/mfa') {
-    resultat = estApi ? reponseErreurApi('Vérification à deux facteurs requise.', 403) : cheminRedirection(request, '/mfa');
+  } else if (chemin === '/mfa') {
+    resultat = cheminRedirection(request, '/');
   } else if (estApi && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
     const origine = request.headers.get('origin');
     resultat = origine === request.nextUrl.origin

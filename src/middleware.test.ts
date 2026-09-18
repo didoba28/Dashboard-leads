@@ -53,7 +53,7 @@ describe('accès au dashboard', () => {
     expect(emailAutorise('autre@exemple.fr')).toBe(false);
   });
 
-  it('refuse un compte non autorisé et exige le deuxième facteur', async () => {
+  it('refuse un compte non autorisé et accepte le compte avec le code', async () => {
     configurerAuth();
     etatAuth.email = 'autre@exemple.fr';
     etatAuth.aal = 'aal2';
@@ -62,16 +62,18 @@ describe('accès au dashboard', () => {
 
     etatAuth.email = 'adel@exemple.fr';
     etatAuth.aal = 'aal1';
-    const mfa = await middleware(new NextRequest('https://leads.example.com/leads'));
+    const page = await middleware(new NextRequest('https://leads.example.com/leads'));
     const api = await middleware(new NextRequest('https://leads.example.com/api/leads'));
-    expect(mfa.headers.get('location')).toBe('https://leads.example.com/mfa');
-    expect(api.status).toBe(403);
+    const ancienneMfa = await middleware(new NextRequest('https://leads.example.com/mfa'));
+    expect(page.status).toBe(200);
+    expect(api.status).toBe(200);
+    expect(ancienneMfa.headers.get('location')).toBe('https://leads.example.com/');
   });
 
-  it('accepte une session aal2 et bloque une écriture cross-origin', async () => {
+  it('bloque une écriture cross-origin même avec une session', async () => {
     configurerAuth();
     etatAuth.email = 'adel@exemple.fr';
-    etatAuth.aal = 'aal2';
+    etatAuth.aal = 'aal1';
     const page = await middleware(new NextRequest('https://leads.example.com/leads'));
     const mutation = await middleware(new NextRequest('https://leads.example.com/api/leads', {
       method: 'POST', headers: { origin: 'https://attaquant.example.com' },
