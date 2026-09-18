@@ -6,8 +6,9 @@ persistant, mais pas sur un hébergement dont le système de fichiers est
 éphémère (Vercel, Netlify Functions, Cloud Run…) : le fichier y disparaît à
 chaque redéploiement.
 
-Pour ces cas, l'application sait parler à PostgreSQL. La bascule se fait par
-**une seule variable d'environnement**, sans toucher au code.
+Pour ces cas, l'application sait parler à PostgreSQL via `DATABASE_URL`.
+Si le serveur utilise un rôle limité et que le schéma est préparé à l'avance,
+ajoutez aussi `DATABASE_SCHEMA_MANAGED=1`.
 
 ## En bref
 
@@ -18,7 +19,7 @@ DATABASE_URL=postgresql://postgres:MOT_DE_PASSE@db.xxxxxxxx.supabase.co:5432/pos
 ```
 
 Au démarrage, l'application détecte l'URL, ouvre un pool PostgreSQL, applique
-ses migrations si les tables n'existent pas, et se comporte exactement comme
+ses migrations si `DATABASE_SCHEMA_MANAGED` n'est pas `1`, et se comporte exactement comme
 avec SQLite. Rien d'autre ne change : mêmes écrans, mêmes routes, mêmes règles.
 
 ## Marche à suivre avec Supabase
@@ -34,12 +35,14 @@ avec SQLite. Rien d'autre ne change : mêmes écrans, mêmes routes, mêmes règ
      (port `5432`) convient.
 3. Collez-la dans `DATABASE_URL` de votre `.env.local` (ou dans les variables
    d'environnement de votre hébergeur).
-4. Optionnel — créez les tables à l'avance en collant
+4. Pour utiliser un rôle PostgreSQL limité, créez les tables à l'avance en collant
    [`supabase/schema.sql`](../supabase/schema.sql) dans l'éditeur SQL de
-   Supabase. Ce n'est pas obligatoire : l'application crée les tables
-   manquantes elle-même au premier accès. Les migrations sont idempotentes, les
-   deux chemins mènent au même schéma.
-5. Redémarrez l'application. Vérifiez sur la page **Intégrations** ou via
+   Supabase. Ce fichier crée aussi `dashboard_app`, sans mot de passe. Définissez
+   un mot de passe fort pour ce rôle dans Supabase et utilisez-le dans
+   `DATABASE_URL` ; réglez `DATABASE_SCHEMA_MANAGED=1`. Sans rôle limité,
+   l'application peut créer les tables au premier accès avec un compte ayant
+   les droits DDL.
+5. Redémarrez l'application. Vérifiez `/api/health` puis la page **Intégrations** ou via
    `GET /api/reglages` que tout répond normalement.
 
 Le chiffrement TLS est activé automatiquement pour Supabase et le certificat

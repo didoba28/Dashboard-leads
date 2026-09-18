@@ -1,0 +1,10 @@
+project_id = "dashboard-leads"
+
+[auth]
+site_url = "https://dashboard-leads-vert.vercel.app"
+additional_redirect_urls = ["https://dashboard-leads-vert.vercel.app/auth/callback"]
+enable_signup = false
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = false

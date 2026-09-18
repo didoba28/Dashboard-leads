@@ -263,6 +263,7 @@ Voir `.env.example` pour le détail complet, commenté. Résumé :
 | --- | --- | --- |
 | `DATABASE_PATH` | Chemin du fichier SQLite. | Non — par défaut `data/leads.db` |
 | `DATABASE_URL` | Connexion PostgreSQL/Supabase côté serveur. | Oui sur Vercel |
+| `DATABASE_SCHEMA_MANAGED` | `1` si le schéma est préparé dans Supabase et que le rôle du serveur ne peut pas créer de tables. | Oui avec un rôle PostgreSQL limité |
 | `SUPABASE_DB_CA_CERT` | Certificat CA de la base pour valider TLS. | Selon le certificat utilisé par Supabase |
 | `NEXT_PUBLIC_SUPABASE_URL` | URL publique de Supabase Auth. | Oui en production |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Clé publiable de Supabase Auth. | Oui en production |

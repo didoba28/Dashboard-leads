@@ -109,3 +109,36 @@ END $$;
 INSERT INTO migrations (nom, applique_le)
 VALUES ('001_initial', now()::text)
 ON CONFLICT (nom) DO NOTHING;
+
+INSERT INTO migrations (nom, applique_le)
+VALUES ('002_verrouillage_rls', now()::text)
+ON CONFLICT (nom) DO NOTHING;
+
+-- Rôle réservé au serveur. Définir son mot de passe séparément, puis utiliser
+-- ce rôle dans DATABASE_URL avec DATABASE_SCHEMA_MANAGED=1.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_app') THEN
+    CREATE ROLE dashboard_app LOGIN;
+  END IF;
+END $$;
+
+GRANT CONNECT ON DATABASE postgres TO dashboard_app;
+GRANT USAGE ON SCHEMA public TO dashboard_app;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON TABLE migrations, leads, objectifs, reglages, journal_sync TO dashboard_app;
+
+DO $$
+DECLARE table_name TEXT;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY['migrations', 'leads', 'objectifs', 'reglages', 'journal_sync'] LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = table_name AND policyname = 'dashboard_app_access'
+    ) THEN
+      EXECUTE format(
+        'CREATE POLICY dashboard_app_access ON public.%I FOR ALL TO dashboard_app USING (true) WITH CHECK (true)',
+        table_name
+      );
+    END IF;
+  END LOOP;
+END $$;

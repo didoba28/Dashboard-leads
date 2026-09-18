@@ -201,6 +201,8 @@ export async function creerPilotePostgres(urlConnexion: string): Promise<PiloteD
     max: 5,
   });
   const pilote = new PilotePostgres(pool, pool);
-  await appliquerMigrations(pilote, MIGRATIONS_POSTGRES);
+  if (process.env.DATABASE_SCHEMA_MANAGED !== '1') {
+    await appliquerMigrations(pilote, MIGRATIONS_POSTGRES);
+  }
   return pilote;
 }
