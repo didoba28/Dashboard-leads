@@ -6,40 +6,21 @@
  * ou non). C'est ce que surveillera un uptime monitor.
  */
 import { NextResponse } from 'next/server';
-import { getDb, nomDuPilote } from '@/lib/db';
-import { notionEstConfigure } from '@/lib/notion/client';
+import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const debut = Date.now();
   try {
     const db = await getDb();
-    const ligne = await db.get<{ n: number }>(
-      'SELECT COUNT(*) AS n FROM leads WHERE deleted_at IS NULL',
-    );
-    return NextResponse.json({
-      statut: 'ok',
-      pilote: await nomDuPilote(),
-      leads: Number(ligne?.n ?? 0),
-      latenceMs: Date.now() - debut,
-      integrations: {
-        notion: notionEstConfigure(),
-        slack: Boolean(process.env['SLACK_SIGNING_SECRET']),
-        ingestion: Boolean(process.env['INGEST_TOKEN']),
-        cle_api: Boolean(process.env['API_KEY']),
-        taches_planifiees: Boolean(process.env['CRON_SECRET']),
-      },
-      versionNode: process.version,
+    await db.get('SELECT 1 FROM leads LIMIT 1');
+    return NextResponse.json({ statut: 'ok' }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (erreur) {
+    const diagnostic = erreur as { name?: string; code?: string; cause?: { code?: string } };
+    console.error('[health] Base indisponible', {
+      type: diagnostic.name,
+      code: diagnostic.code ?? diagnostic.cause?.code,
     });
-  } catch (err) {
-    return NextResponse.json(
-      {
-        statut: 'degrade',
-        erreur: err instanceof Error ? err.message : String(err),
-        latenceMs: Date.now() - debut,
-      },
-      { status: 503 },
-    );
+    return NextResponse.json({ statut: 'degrade' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
 }

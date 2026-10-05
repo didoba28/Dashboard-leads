@@ -60,6 +60,8 @@ let instancePromise: Promise<PiloteDonnees> | null = null;
 async function initialiser(): Promise<PiloteDonnees> {
   const url = urlPostgres();
   if (url) return creerPilotePostgres(url);
+  if (process.env.DATABASE_URL) throw new Error('DATABASE_URL doit être une URL PostgreSQL valide.');
+  if (process.env.VERCEL) throw new Error('DATABASE_URL est obligatoire sur Vercel.');
 
   const chemin = cheminBaseSqlite();
   const choix = await choisirPiloteSqlite();

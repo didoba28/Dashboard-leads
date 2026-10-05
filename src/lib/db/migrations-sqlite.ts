@@ -85,4 +85,14 @@ export const MIGRATIONS_SQLITE: Migration[] = [
       );
     `,
   },
+  {
+    nom: '002_confirmation_points',
+    sql: `
+      ALTER TABLE leads ADD COLUMN validation_requise INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE leads ADD COLUMN points_confirmes INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE leads ADD COLUMN points_confirmes_le TEXT;
+      ALTER TABLE leads ADD COLUMN points_confirmes_par TEXT;
+      CREATE INDEX IF NOT EXISTS idx_leads_confirmation ON leads(points_confirmes, date_reception);
+    `,
+  },
 ];

@@ -11,7 +11,7 @@ Slack #inbound  ─┐
 Formulaires Webflow ─┼──►  /api/ingest/*  ──►  moteur de règles  ──►  base
 E-mails via Make ─┘                                                    │
                                                                        ▼
-                                          tâche planifiée horaire ──► Notion
+                                          tâche planifiée quotidienne ──► Notion
 ```
 
 Trois portes d'entrée, un seul moteur de scoring, une base, et Notion tenu à
@@ -45,6 +45,10 @@ Le détail, y compris la reprise des données existantes, est dans
 | Variable | Valeur |
 | --- | --- |
 | `DATABASE_URL` | la chaîne Supabase de l'étape 1.1 |
+| `SUPABASE_DB_CA_CERT` | le certificat CA PEM de la base si nécessaire à la validation TLS |
+| `NEXT_PUBLIC_SUPABASE_URL` | l'URL du projet Supabase Auth |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | la clé publiable Supabase Auth |
+| `DASHBOARD_ALLOWED_EMAILS` | les adresses e-mail exactes autorisées, séparées par des virgules |
 | `INGEST_TOKEN` | une chaîne aléatoire que vous générez |
 | `CRON_SECRET` | une autre chaîne aléatoire |
 | `API_KEY` | une troisième chaîne aléatoire |
@@ -62,9 +66,8 @@ node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 curl https://VOTRE-URL/api/health
 ```
 
-Vous devez lire `"statut":"ok"`, `"pilote":"postgres"`, et les intégrations
-déjà configurées à `true`. Cette route est publique et ne divulgue aucune
-donnée de lead — elle est faite pour être surveillée par un service d'uptime.
+Vous devez lire `"statut":"ok"`. Cette route publique ne révèle que l'état
+de la base et peut être surveillée par un service d'uptime.
 
 ## Étape 2 — Slack `#inbound`
 
@@ -96,13 +99,13 @@ Webflow sait appeler une URL à chaque soumission de formulaire.
 1. Dans les réglages du site Webflow : **Site settings → Integrations →
    Webhooks → Add Webhook**.
 2. Trigger type : **Form submission**.
-3. URL : `https://VOTRE-URL/api/ingest/webflow?token=VOTRE_INGEST_TOKEN`
+3. URL : `https://VOTRE-URL/api/ingest/webflow`
 
-Le jeton passe par l'URL parce que Webflow ne permet pas d'ajouter un en-tête.
-Traitez donc cette URL comme un secret. Si vous créez le webhook par l'API
-Webflow plutôt que par l'interface, vous obtenez en plus un secret de
-signature : placez-le dans `WEBFLOW_WEBHOOK_SECRET` et chaque requête sera
-authentifiée cryptographiquement.
+Récupérez la clé de signature de ce webhook dans Webflow et placez-la dans
+`WEBFLOW_WEBHOOK_SECRET` : le serveur vérifie obligatoirement la signature en
+production. Aucun secret n'est inclus dans l'URL. Les webhooks créés avec
+un jeton de site récent disposent de leur propre clé ; ceux d'une app OAuth
+utilisent le secret client de l'app.
 
 Le nom du formulaire Webflow devient le **lead magnet** du lead. Nommez donc
 vos formulaires pour ce qu'ils sont — « Téléchargement catalogue 2026 »,
@@ -179,12 +182,19 @@ Content-Type: application/json
 Réponse : les points, l'éligibilité à l'activation, et la règle appliquée avec
 son explication. Un seul endroit décide, et il sait dire pourquoi.
 
-### Forcer une valeur
+### Valider les points dans le dashboard
 
-En dernier recours, `"pointsForces": 0.5` avec `"raisonPointsForces": "…"`
-impose une valeur. Elle apparaît dans le dashboard comme arbitrage manuel,
-distincte du calcul automatique, et la raison est conservée. À réserver aux cas
-que la règle ne sait pas trancher.
+Chaque lead reçu par une automatisation est créé avec des **points proposés**.
+Les détails d'origine, y compris les champs supplémentaires transmis par Make,
+restent visibles dans sa fiche. Ouvrez **Leads → Points à confirmer**, vérifiez
+les informations et, si nécessaire, corrigez les dimensions ou choisissez
+« Points forcés ». Cliquez ensuite sur **Enregistrer et confirmer les points**.
+Avant cette confirmation, le lead reste visible, mais ses points et éventuelles
+opportunités ne comptent pas dans les objectifs et primes.
+
+`"pointsForces": 0.5` et `"raisonPointsForces": "…"` envoyés par Make sont
+conservés dans les détails d'origine comme suggestion ; ils ne valident ni ne
+forcent les points automatiquement.
 
 ### Envoyer un lot
 
@@ -200,14 +210,19 @@ dans la réponse (`"doublon": true`).
 
 ## Étape 5 — Notion en continu
 
-Le fichier `vercel.json` déclare une synchronisation **toutes les heures**.
+Le fichier `vercel.json` déclare une synchronisation **chaque jour à 05:00 UTC**.
 Elle s'active dès que `CRON_SECRET` est défini sur le projet — Vercel transmet
 le secret automatiquement, vous n'avez rien à configurer de plus.
+
+Cette fréquence fonctionne aussi sur Vercel Hobby, qui n'accepte pas de tâche
+plus fréquente qu'une fois par jour. Pour une synchronisation horaire, utilisez
+Vercel Pro ou programmez un appel à `/api/cron/notion-sync` depuis Make avec
+`Authorization: Bearer VOTRE_CRON_SECRET`.
 
 Prérequis : `NOTION_TOKEN` renseigné et une base connectée (page
 **Intégrations** du dashboard, ou `npm run notion:setup`).
 
-Pour changer la fréquence, modifiez `vercel.json` :
+Sur Vercel Pro, pour passer à une fréquence de 15 minutes, modifiez `vercel.json` :
 
 ```json
 { "crons": [ { "path": "/api/cron/notion-sync", "schedule": "*/15 * * * *" } ] }
@@ -225,32 +240,31 @@ un scénario Make hebdomadaire pour recevoir le récapitulatif dans Slack.
 
 ## Étape 6 — Fermer l'API
 
-Dès que `API_KEY` est définie, les routes de lecture et d'écriture exigent
-`Authorization: Bearer VOTRE_API_KEY`. L'interface du dashboard continue de
-fonctionner sans rien présenter : les navigateurs identifient leurs propres
-requêtes par un en-tête que les autres sites ne peuvent pas falsifier.
+Dès que `API_KEY` est définie, les scripts tiers peuvent accéder aux routes de
+lecture et d'écriture avec `Authorization: Bearer VOTRE_API_KEY`. L'interface
+utilise une session Supabase réservée aux adresses autorisées. Une configuration
+Auth incomplète rend l'interface indisponible en
+production au lieu d'exposer les données. Le guide complet figure dans
+[`SUPABASE.md`](SUPABASE.md).
 
-**Ce que cela protège, et ce que cela ne protège pas.** La clé empêche un outil
-tiers d'interroger votre API. Elle n'authentifie pas les personnes : qui a
-l'URL du dashboard voit toujours les leads. Une vraie page de connexion reste à
-ajouter avant d'exposer l'adresse largement.
-
-Les routes d'ingestion ne sont pas concernées — elles ont leur propre jeton — ni
+Les routes d'ingestion ne sont pas concernées — elles ont leur propre secret — ni
 `/api/health`, volontairement publique.
 
 ## Récapitulatif des secrets
 
 | Secret | Protège | Qui le présente |
 | --- | --- | --- |
-| `INGEST_TOKEN` | `/api/ingest/email`, `/webflow`, `/formulaire` | Webflow, Make |
+| `INGEST_TOKEN` | `/api/ingest/email`, `/formulaire` | Make et relais e-mail |
 | `SLACK_SIGNING_SECRET` | signature des requêtes Slack | Slack (automatique) |
-| `WEBFLOW_WEBHOOK_SECRET` | signature Webflow, facultatif | Webflow (automatique) |
+| `WEBFLOW_WEBHOOK_SECRET` | signature Webflow, obligatoire en production | Webflow (automatique) |
 | `API_KEY` | lecture et écriture de l'API | outils tiers |
 | `CRON_SECRET` | `/api/cron/*` | l'ordonnanceur |
 | `DATABASE_URL` | la base | l'application seule |
 
-Aucun de ces secrets ne doit être préfixé `NEXT_PUBLIC_` : ils seraient envoyés
-au navigateur.
+Les secrets (`DATABASE_URL`, `SUPABASE_DB_CA_CERT`, `DASHBOARD_ALLOWED_EMAILS`,
+`API_KEY`, `INGEST_TOKEN`, `CRON_SECRET` et signatures) restent côté serveur.
+Seules `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+sont publiques par conception.
 
 ## Vérifier que la chaîne fonctionne
 
@@ -259,7 +273,7 @@ au navigateur.
    une adresse e-mail. Il doit apparaître dans **Leads** en quelques secondes.
 3. Soumettez un formulaire de test sur le site Webflow. Même vérification.
 4. Déclenchez le scénario Make à la main sur un e-mail réel.
-5. Attendez l'heure ronde, puis ouvrez la base Notion : les leads doivent y
+5. Après la tâche quotidienne (ou un appel manuel à la route de synchronisation), ouvrez la base Notion : les leads doivent y
    être. La page **Intégrations** affiche le journal des synchronisations, avec
    les erreurs éventuelles.
 

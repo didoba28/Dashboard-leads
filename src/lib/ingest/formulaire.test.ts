@@ -85,22 +85,22 @@ describe('leadDepuisFormulaire', () => {
     expect(lead.aVerifier).toBe(true);
   });
 
-  it('reporte pointsForces sur pointsOverride avec une raison par défaut', () => {
+  it('conserve les points proposés par Make sans arbitrage automatique', () => {
     const entree = schemaFormulaire.parse({ sujet: 'Demande prioritaire', pointsForces: 1 });
     const lead = leadDepuisFormulaire(entree);
-    expect(lead.pointsOverride).toBe(1);
-    expect(lead.pointsOverrideRaison).toBe('Transmis par l’automatisation');
+    expect(lead.pointsOverride).toBeNull();
+    expect(lead.rawPayload).toMatchObject({ donnees: { pointsForces: 1 } });
   });
 
-  it('conserve la raison explicite de pointsForces quand elle est fournie', () => {
+  it('conserve la raison proposée dans les détails reçus', () => {
     const entree = schemaFormulaire.parse({
       sujet: 'Demande prioritaire',
       pointsForces: 0.5,
       raisonPointsForces: 'Lead validé par téléphone',
     });
     const lead = leadDepuisFormulaire(entree);
-    expect(lead.pointsOverride).toBe(0.5);
-    expect(lead.pointsOverrideRaison).toBe('Lead validé par téléphone');
+    expect(lead.pointsOverride).toBeNull();
+    expect(lead.rawPayload).toMatchObject({ donnees: { pointsForces: 0.5, raisonPointsForces: 'Lead validé par téléphone' } });
   });
 
   it('ne remplit dimensionsFournies que pour les dimensions réellement transmises', () => {

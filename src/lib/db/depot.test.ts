@@ -12,6 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { fermerDb, getDb } from './index';
 import {
   creerLead,
+  confirmerPointsLead,
   leadsAPousser,
   lireLead,
   listerLeads,
@@ -22,7 +23,7 @@ import {
   supprimerLead,
 } from './leads';
 import { ecrireObjectif, ecrireReglages, lireObjectif, lireReglages } from './settings';
-import { schemaLeadInput, type LeadParsed } from '@/lib/domain/lead';
+import { pointsDuLead, pointsProposesDuLead, schemaLeadInput, type LeadParsed } from '@/lib/domain/lead';
 import { OBJECTIF_DEFAUT } from '@/lib/domain/objectives';
 
 function entreeLead(overrides: Record<string, unknown> = {}): LeadParsed {
@@ -58,6 +59,27 @@ function definirTests(): void {
     expect(lead.points).toBe(1);
     expect(lead.eligible).toBe(true);
     expect(lead.regleId).toBe('inbound.b2b');
+  });
+
+  it('propose les points d’un lead automatisé puis les comptabilise après confirmation', async () => {
+    const { lead } = await creerLead(entreeLead({ sourceCollecte: 'site_web' }), { validationRequise: true });
+    expect(lead.validationRequise).toBe(true);
+    expect(lead.pointsConfirmes).toBe(false);
+    expect(pointsProposesDuLead(lead)).toBe(1);
+    expect(pointsDuLead(lead)).toBe(0);
+    expect((await listerLeads({ pointsConfirmes: false })).total).toBe(1);
+
+    const confirme = await confirmerPointsLead(lead.id, 'adel@airfit.co');
+    expect(confirme?.pointsConfirmes).toBe(true);
+    expect(confirme?.pointsConfirmesPar).toBe('adel@airfit.co');
+    expect(confirme?.pointsConfirmesLe).not.toBeNull();
+    expect(pointsDuLead(confirme!)).toBe(1);
+    expect((await listerLeads({ pointsConfirmes: false })).total).toBe(0);
+
+    const modifie = await mettreAJourLead(lead.id, { relation: 'client' });
+    expect(modifie?.pointsConfirmes).toBe(false);
+    expect(modifie?.pointsConfirmesLe).toBeNull();
+    expect(pointsDuLead(modifie!)).toBe(0);
   });
 
   it('re-score automatiquement à 0 point quand la relation passe à « client »', async () => {

@@ -6,8 +6,9 @@ persistant, mais pas sur un hébergement dont le système de fichiers est
 éphémère (Vercel, Netlify Functions, Cloud Run…) : le fichier y disparaît à
 chaque redéploiement.
 
-Pour ces cas, l'application sait parler à PostgreSQL. La bascule se fait par
-**une seule variable d'environnement**, sans toucher au code.
+Pour ces cas, l'application sait parler à PostgreSQL via `DATABASE_URL`.
+Si le serveur utilise un rôle limité et que le schéma est préparé à l'avance,
+ajoutez aussi `DATABASE_SCHEMA_MANAGED=1`.
 
 ## En bref
 
@@ -18,7 +19,7 @@ DATABASE_URL=postgresql://postgres:MOT_DE_PASSE@db.xxxxxxxx.supabase.co:5432/pos
 ```
 
 Au démarrage, l'application détecte l'URL, ouvre un pool PostgreSQL, applique
-ses migrations si les tables n'existent pas, et se comporte exactement comme
+ses migrations si `DATABASE_SCHEMA_MANAGED` n'est pas `1`, et se comporte exactement comme
 avec SQLite. Rien d'autre ne change : mêmes écrans, mêmes routes, mêmes règles.
 
 ## Marche à suivre avec Supabase
@@ -34,29 +35,67 @@ avec SQLite. Rien d'autre ne change : mêmes écrans, mêmes routes, mêmes règ
      (port `5432`) convient.
 3. Collez-la dans `DATABASE_URL` de votre `.env.local` (ou dans les variables
    d'environnement de votre hébergeur).
-4. Optionnel — créez les tables à l'avance en collant
+4. Pour utiliser un rôle PostgreSQL limité, créez les tables à l'avance en collant
    [`supabase/schema.sql`](../supabase/schema.sql) dans l'éditeur SQL de
-   Supabase. Ce n'est pas obligatoire : l'application crée les tables
-   manquantes elle-même au premier accès. Les migrations sont idempotentes, les
-   deux chemins mènent au même schéma.
-5. Redémarrez l'application. Vérifiez sur la page **Intégrations** ou via
+   Supabase. Ce fichier crée aussi `dashboard_app`, sans mot de passe. Définissez
+   un mot de passe fort pour ce rôle dans Supabase et utilisez-le dans
+   `DATABASE_URL` ; réglez `DATABASE_SCHEMA_MANAGED=1`. Sans rôle limité,
+   l'application peut créer les tables au premier accès avec un compte ayant
+   les droits DDL.
+5. Redémarrez l'application. Vérifiez `/api/health` puis la page **Intégrations** ou via
    `GET /api/reglages` que tout répond normalement.
 
-Le chiffrement TLS est activé automatiquement quand l'URL contient
-`supabase.co` ou `sslmode=require` — vous n'avez rien à configurer.
+Le chiffrement TLS est activé automatiquement pour Supabase et le certificat
+du serveur est vérifié. Si votre projet utilise une autorité de certification
+propre à Supabase, copiez son certificat PEM depuis les réglages SSL de la base
+dans `SUPABASE_DB_CA_CERT` (sauts de ligne représentés par `\n`). Ne
+désactivez pas la vérification TLS pour résoudre une erreur de certificat.
+
+## Authentification des personnes
+
+Le projet Supabase sert également à l'authentification du dashboard :
+
+1. Gardez le fournisseur e-mail activé et désactivez les inscriptions publiques
+   au niveau global de Supabase Auth (`auth.enable_signup = false`). Ne
+   désactivez pas `auth.email.enable_signup` : cela bloque aussi la connexion
+   des comptes existants. Créez chaque compte autorisé avec un mot de passe
+   dans **Authentication → Users**.
+2. Renseignez l'URL du dashboard dans la configuration des URL Auth de Supabase.
+3. Définissez `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   et `DASHBOARD_ALLOWED_EMAILS` (adresses exactes séparées par des virgules).
+4. Chaque personne choisit son nom et saisit le code d’accès. L'accès aux
+   pages et aux API requiert une session Supabase correspondant à l'une des
+   adresses autorisées. Aucun code TOTP n'est demandé.
+
+Un code court partagé ne permet pas de distinguer les personnes qui le
+connaissent. Remplacez-le par des secrets distincts si l'accès doit être
+attribuable à chaque personne.
+
+Si vous souhaitez rétablir les liens de connexion ou permettre la
+récupération d'un mot de passe par e-mail, configurez un
+[serveur SMTP dédié](https://supabase.com/docs/guides/auth/auth-smtp).
+Le service e-mail gratuit de Supabase limite l'envoi aux membres de
+l'organisation, avec un quota réduit. Ne donnez pas un accès à l'organisation
+Supabase uniquement pour permettre la réception d'un lien.
+
+La clé publiable est visible dans le navigateur par conception. La migration
+`002_verrouillage_rls` active RLS et retire les droits `anon` et
+`authenticated` sur toutes les tables du dashboard. Aucune politique publique
+n'est créée ; le serveur y accède avec `DATABASE_URL`.
 
 ## Sécurité
 
-La base n'est **jamais** interrogée depuis le navigateur : seules les routes
-serveur Next.js s'y connectent. Tant que c'est le cas, vous pouvez laisser RLS
-désactivé sur ces tables et n'exposer que `DATABASE_URL` côté serveur.
+La base métier n'est **jamais** interrogée depuis le navigateur : seules les
+routes serveur Next.js s'y connectent. RLS reste activé pour fermer l'API Data
+de Supabase aux clés publiques, même si celles-ci sont présentes dans le client
+pour Supabase Auth.
 
 Deux règles à ne pas enfreindre :
 
 - `DATABASE_URL` ne doit jamais être préfixée par `NEXT_PUBLIC_`, sinon elle
   serait envoyée au navigateur.
-- Si un jour un accès direct depuis le client est ajouté (clé `anon`), activez
-  RLS et écrivez les politiques **avant** d'exposer quoi que ce soit.
+- Si un jour un accès direct à ces tables depuis le client est ajouté, créez
+  des droits et des politiques RLS strictes avant de l'activer.
 
 ## Migrer des données existantes
 

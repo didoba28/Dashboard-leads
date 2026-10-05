@@ -60,6 +60,7 @@ export const schemaFormulaire = z
 
     sourceCollecte: z.enum(SOURCES_COLLECTE).default('email_formulaire'),
   })
+  .passthrough()
   .refine(
     (v) =>
       Boolean(v.email) ||
@@ -120,12 +121,6 @@ export function leadDepuisFormulaire(entree: EntreeFormulaire): LeadDepuisFormul
 
   const nom = [entree.prenom, entree.nom].filter((v) => v?.trim()).join(' ').trim() || resultat.nom;
 
-  const pointsOverride = entree.pointsForces ?? null;
-  const pointsOverrideRaison =
-    entree.pointsForces !== undefined
-      ? entree.raisonPointsForces || 'Transmis par l’automatisation'
-      : entree.raisonPointsForces || null;
-
   return {
     dateReception: dateDepuisRecuLe(entree.recuLe),
     nom: nom || null,
@@ -142,8 +137,10 @@ export function leadDepuisFormulaire(entree: EntreeFormulaire): LeadDepuisFormul
     campagne: entree.campagne || resultat.campagne,
     leadMagnet: entree.leadMagnet || resultat.leadMagnet,
     message: (corps || entree.sujet || '').slice(0, LONGUEUR_MAX_MESSAGE) || null,
-    pointsOverride,
-    pointsOverrideRaison,
+    // Make peut suggérer des points dans le détail transmis, mais ne valide pas
+    // un arbitrage : cette décision appartient à la personne dans le dashboard.
+    pointsOverride: null,
+    pointsOverrideRaison: null,
     aVerifier: confiance < SEUIL_CONFIANCE,
     confiance,
     rawPayload: {
@@ -151,6 +148,7 @@ export function leadDepuisFormulaire(entree: EntreeFormulaire): LeadDepuisFormul
       formulaire: entree.formulaire ?? null,
       champs: entree.champs ?? null,
       dimensionsFournies,
+      donnees: entree,
     },
     dimensionsFournies,
   };

@@ -106,6 +106,7 @@ const LONGUEUR_MAX_MESSAGE = 5000;
 export interface ParamsLeadDepuisMessageSlack {
   texte: string;
   blocs?: unknown;
+  evenement?: unknown;
   ts: string;
   canal: string;
 }
@@ -139,6 +140,6 @@ export function leadDepuisMessageSlack(params: ParamsLeadDepuisMessageSlack): Le
     message: texteNettoye.slice(0, LONGUEUR_MAX_MESSAGE),
     aVerifier: resultat.confiance < SEUIL_CONFIANCE,
     confiance: resultat.confiance,
-    rawPayload: { source: 'slack', canal: params.canal, ts: params.ts, texte: params.texte },
+    rawPayload: { source: 'slack', canal: params.canal, ts: params.ts, texte: params.texte, blocs: params.blocs ?? null, evenement: params.evenement ?? null },
   };
 }

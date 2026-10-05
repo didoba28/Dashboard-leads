@@ -14,8 +14,9 @@ export default async function PageLeads({
   const params = await searchParams;
   const reglages = await lireReglages();
   const demande = typeof params['periode'] === 'string' ? params['periode'] : null;
-  const periode = demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
+  const periode = demande === 'toutes' ? 'toutes' : demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
   const aVerifier = params['aVerifier'] === 'true';
+  const aConfirmer = params['aConfirmer'] === 'true';
 
   const filtres: FiltresVue = {
     periode,
@@ -25,12 +26,14 @@ export default async function PageLeads({
     typeDemande: '',
     initiative: '',
     aVerifier,
+    aConfirmer,
     tri: 'date_desc',
   };
 
   const { leads, total } = await listerLeads({
-    periode,
+    ...(periode === 'toutes' ? {} : { periode }),
     aVerifier: aVerifier ? true : undefined,
+    pointsConfirmes: aConfirmer ? false : undefined,
     limite: 50,
   });
 
@@ -39,7 +42,7 @@ export default async function PageLeads({
       leadsInitiaux={leads}
       totalInitial={total}
       filtresInitiaux={filtres}
-      periodes={periodesAutour(periode, 5, 2).map((p) => ({ id: p.id, label: p.label }))}
+      periodes={[{ id: 'toutes', label: 'Toutes périodes' }, ...periodesAutour(periode === 'toutes' ? reglages.periodeActive : periode, 5, 2).map((p) => ({ id: p.id, label: p.label }))]}
     />
   );
 }

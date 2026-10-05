@@ -28,7 +28,7 @@ import {
   type TypeActivation,
   type TypeDemande,
 } from '@/lib/domain/taxonomy';
-import type { Lead, LeadParsed } from '@/lib/domain/lead';
+import { pointsDuLead, type Lead, type LeadParsed } from '@/lib/domain/lead';
 import { periodeDepuisDate } from '@/lib/domain/periods';
 
 /** Noms des propriétés Notion (modifiables ici seulement). */
@@ -138,10 +138,10 @@ export function versProprietesNotion(lead: Lead): Record<string, unknown> {
     [P.dateActivation]: date(lead.dateActivation),
     [P.proprietaire]: texte(lead.proprietaire),
     [P.tags]: { multi_select: lead.tags.map((t) => ({ name: t.slice(0, 90) })) },
-    [P.points]: { number: lead.pointsOverride ?? lead.points },
+    [P.points]: { number: pointsDuLead(lead) },
     [P.pointsOverride]: { number: lead.pointsOverride },
     [P.eligible]: { checkbox: lead.eligible },
-    [P.eligibleActivation]: { checkbox: lead.eligibleActivation },
+    [P.eligibleActivation]: { checkbox: lead.pointsConfirmes && lead.eligibleActivation },
     [P.regle]: texte(lead.regleLabel),
     [P.aVerifier]: { checkbox: lead.aVerifier },
     [P.periode]: texte(periodeDepuisDate(lead.dateReception)),

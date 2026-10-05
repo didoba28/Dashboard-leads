@@ -32,7 +32,7 @@ export async function POST(request: Request) {
         try {
           const entree = schemaEmailEntrant.parse(brut);
           const parsed = schemaLeadInput.parse(leadDepuisEmail(entree));
-          const { doublon } = await creerLead(parsed, { dedupliquer: true });
+          const { doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
           if (doublon) doublons++;
           else crees++;
         } catch (err) {
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
     const entree = schemaEmailEntrant.parse(body);
     const parsed = schemaLeadInput.parse(leadDepuisEmail(entree));
-    const { lead, doublon } = await creerLead(parsed, { dedupliquer: true });
+    const { lead, doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
     return ok({ cree: !doublon, doublon, lead }, { status: doublon ? 200 : 201 });
   } catch (err) {
     return gererErreur(err);

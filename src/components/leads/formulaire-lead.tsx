@@ -152,13 +152,20 @@ export function FormulaireLead({
       }),
     [v.segment, v.relation, v.typeDemande, v.initiative],
   );
+  const scoreModifie = Boolean(lead && (
+    v.segment !== lead.segment ||
+    v.relation !== lead.relation ||
+    v.typeDemande !== lead.typeDemande ||
+    v.initiative !== lead.initiative ||
+    (v.pointsOverride === '' ? null : Number(v.pointsOverride)) !== lead.pointsOverride
+  ));
+  const confirmationDisponible = Boolean(lead?.validationRequise && (!lead.pointsConfirmes || scoreModifie));
 
   function set<K extends keyof ValeursLead>(cle: K, valeur: ValeursLead[K]) {
     setV((prev) => ({ ...prev, [cle]: valeur }));
   }
 
-  async function soumettre(e: React.FormEvent) {
-    e.preventDefault();
+  async function enregistrer(confirmer: boolean) {
     setEnCours(true);
     setErreurs({});
     try {
@@ -177,8 +184,18 @@ export function FormulaireLead({
         notifier({ ton: 'erreur', titre: 'Enregistrement refusé', detail: data?.erreur ?? 'Erreur inconnue' });
         return;
       }
-      notifier({ ton: 'succes', titre: lead ? 'Lead mis à jour' : 'Lead créé' });
-      onEnregistre(lead ? (data as Lead) : (data.lead as Lead));
+      let resultat = lead ? (data as Lead) : (data.lead as Lead);
+      if (confirmer && lead) {
+        const confirmation = await fetch(`/api/leads/${lead.id}/confirmer`, { method: 'POST' });
+        const donneesConfirmation = await confirmation.json();
+        if (!confirmation.ok) throw new Error(donneesConfirmation?.erreur ?? 'Confirmation impossible');
+        resultat = donneesConfirmation as Lead;
+      }
+      notifier({
+        ton: 'succes',
+        titre: confirmer ? 'Points confirmés et comptabilisés' : lead ? 'Lead mis à jour' : 'Lead créé',
+      });
+      onEnregistre(resultat);
     } catch (err) {
       notifier({ ton: 'erreur', titre: 'Erreur réseau', detail: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -186,10 +203,31 @@ export function FormulaireLead({
     }
   }
 
+  function soumettre(e: React.FormEvent) {
+    e.preventDefault();
+    void enregistrer(false);
+  }
+
   return (
     <form onSubmit={soumettre} className="flex h-full flex-col">
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
-        <AperçuScore score={score} pointsForces={v.pointsOverride === '' ? null : Number(v.pointsOverride)} />
+        <AperçuScore
+          score={score}
+          pointsForces={v.pointsOverride === '' ? null : Number(v.pointsOverride)}
+          enAttente={Boolean(lead?.validationRequise && !lead.pointsConfirmes)}
+        />
+
+        {lead?.rawPayload ? (
+          <section className="space-y-2 rounded-lg border border-hair bg-surface-2 p-3.5">
+            <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+              Détails reçus de l’automatisation
+            </h3>
+            <p className="text-xs text-ink-2">Source : {LABELS_SOURCE_COLLECTE[lead.sourceCollecte]}</p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface px-3 py-2 text-xs text-ink-2">
+              {JSON.stringify(lead.rawPayload, null, 2)}
+            </pre>
+          </section>
+        ) : null}
 
         <section className="space-y-3">
           <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Qualification</h3>
@@ -342,9 +380,14 @@ export function FormulaireLead({
         <Bouton type="button" variante="discret" onClick={onAnnuler}>
           Annuler
         </Bouton>
-        <Bouton type="submit" variante="principal" enCours={enCours}>
-          {lead ? 'Enregistrer' : 'Créer le lead'}
+        <Bouton type="submit" variante={confirmationDisponible ? 'secondaire' : 'principal'} enCours={enCours}>
+          {lead ? (confirmationDisponible ? 'Enregistrer sans confirmer' : 'Enregistrer') : 'Créer le lead'}
         </Bouton>
+        {confirmationDisponible ? (
+          <Bouton type="button" variante="principal" enCours={enCours} onClick={() => void enregistrer(true)}>
+            Enregistrer et confirmer les points
+          </Bouton>
+        ) : null}
       </div>
     </form>
   );

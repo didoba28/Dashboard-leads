@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
+    if (process.env.NODE_ENV === 'production' && !process.env.WEBFLOW_WEBHOOK_SECRET) {
+      return erreur('Signature Webflow non configurée.', 503);
+    }
     // Le corps BRUT est indispensable à la vérification de signature Webflow.
     const corpsBrut = await request.text();
     const erreurSignature = verifierSignatureWebflow({
@@ -17,14 +20,17 @@ export async function POST(request: Request) {
     });
     if (erreurSignature) return erreur(erreurSignature, 401);
 
-    // Webflow ne permet pas d'en-tête personnalisé : le jeton passe par `?token=`.
-    const erreurJeton = verifierJetonIngestion(request);
-    if (erreurJeton) return erreur(erreurJeton, 401);
+    // En local, un webhook sans signature garde l'ancien jeton de test.
+    // En production, la signature vérifiée suffit et aucun secret ne figure dans l'URL.
+    if (!process.env.WEBFLOW_WEBHOOK_SECRET) {
+      const erreurJeton = verifierJetonIngestion(request);
+      if (erreurJeton) return erreur(erreurJeton, 401);
+    }
 
     const payload: unknown = JSON.parse(corpsBrut);
     const entree = schemaWebflow.parse(payload);
     const parsed = schemaLeadInput.parse(leadDepuisWebflow(entree));
-    const { lead, doublon } = await creerLead(parsed, { dedupliquer: true });
+    const { lead, doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
 
     return ok({ cree: !doublon, doublon, lead }, { status: doublon ? 200 : 201 });
   } catch (err) {

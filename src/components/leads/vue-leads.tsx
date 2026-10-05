@@ -14,7 +14,7 @@ import {
   STATUTS,
   TYPES_DEMANDE,
 } from '@/lib/domain/taxonomy';
-import type { Lead } from '@/lib/domain/lead';
+import { pointsDuLead, pointsProposesDuLead, type Lead } from '@/lib/domain/lead';
 import { Badge, Bouton, Carte, EtatVide, Entree, Interrupteur, Selection, Spinner } from '@/components/ui/primitives';
 import { Panneau } from '@/components/ui/panneau';
 import { FormulaireLead } from './formulaire-lead';
@@ -30,6 +30,7 @@ export interface FiltresVue {
   typeDemande: string;
   initiative: string;
   aVerifier: boolean;
+  aConfirmer: boolean;
   tri: string;
 }
 
@@ -37,7 +38,7 @@ const TAILLE_PAGE = 50;
 
 function construireQuery(f: FiltresVue, offset: number): string {
   const p = new URLSearchParams();
-  p.set('periode', f.periode);
+  if (f.periode !== 'toutes') p.set('periode', f.periode);
   p.set('limite', String(TAILLE_PAGE));
   p.set('offset', String(offset));
   p.set('tri', f.tri);
@@ -47,6 +48,7 @@ function construireQuery(f: FiltresVue, offset: number): string {
   if (f.typeDemande) p.set('typeDemande', f.typeDemande);
   if (f.initiative) p.set('initiative', f.initiative);
   if (f.aVerifier) p.set('aVerifier', 'true');
+  if (f.aConfirmer) p.set('pointsConfirmes', 'false');
   return p.toString();
 }
 
@@ -158,14 +160,14 @@ export function VueLeads({
   const nbFiltresActifs = useMemo(
     () =>
       [filtres.q, filtres.segment, filtres.statut, filtres.typeDemande, filtres.initiative].filter(Boolean).length +
-      (filtres.aVerifier ? 1 : 0),
+      (filtres.aVerifier ? 1 : 0) + (filtres.aConfirmer ? 1 : 0),
     [filtres],
   );
 
   function reinitialiser() {
     setRecherche('');
     setOffset(0);
-    setFiltres((f) => ({ ...f, q: '', segment: '', statut: '', typeDemande: '', initiative: '', aVerifier: false }));
+    setFiltres((f) => ({ ...f, q: '', segment: '', statut: '', typeDemande: '', initiative: '', aVerifier: false, aConfirmer: false }));
   }
 
   async function supprimer(lead: Lead) {
@@ -259,6 +261,14 @@ export function VueLeads({
           />
           <div className="flex items-center gap-1.5">
             <Interrupteur
+              actif={filtres.aConfirmer}
+              onChange={(v) => majFiltre('aConfirmer', v)}
+              label="Afficher seulement les leads dont les points restent à confirmer"
+            />
+            <span className="text-xs text-ink-2">Points à confirmer</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Interrupteur
               actif={filtres.aVerifier}
               onChange={(v) => majFiltre('aVerifier', v)}
               label="Afficher seulement les leads à vérifier"
@@ -318,7 +328,9 @@ export function VueLeads({
               </thead>
               <tbody>
                 {leads.map((lead) => {
-                  const points = lead.pointsOverride ?? lead.points;
+                  const points = pointsDuLead(lead);
+                  const pointsProposes = pointsProposesDuLead(lead);
+                  const enAttente = lead.validationRequise && !lead.pointsConfirmes;
                   return (
                     <tr
                       key={lead.id}
@@ -345,6 +357,7 @@ export function VueLeads({
                               {lead.societe && lead.nom ? lead.societe : (lead.email ?? '—')}
                             </p>
                           </div>
+                          {enAttente ? <Badge ton="attention">à confirmer</Badge> : null}
                           {lead.aVerifier ? (
                             <Badge ton="attention" icone={<span aria-hidden>!</span>}>
                               à vérifier
@@ -378,6 +391,11 @@ export function VueLeads({
                         >
                           {formaterPoints(points)}
                         </span>
+                        {enAttente ? (
+                          <span className="block text-[11px] text-[var(--warning)]" title="Proposition non comptabilisée">
+                            {formaterPoints(pointsProposes)} proposé
+                          </span>
+                        ) : null}
                         {lead.pointsOverride != null ? (
                           <span className="ml-1 text-[11px] text-[var(--warning)]" title="Arbitrage manuel" aria-label="Arbitrage manuel">
                             ✎

@@ -159,6 +159,30 @@ describe('leadDepuisWebflow', () => {
     expect(lead.societe).toBe('Acme SAS');
   });
 
+  it('reprend les champs du formulaire AirFit actuellement publié', () => {
+    const entree = schemaWebflow.parse({
+      triggerType: 'form_submission',
+      payload: {
+        name: 'Subventions - Lead Magnet',
+        data: {
+          'Nom et Prénom': 'Marie Dupont',
+          Commune: 'Mairie de Lyon',
+          Mail: 'marie@example.fr',
+          Téléphone: '0601020304',
+          'Precisions sur votre projet (optionnel)': 'Nous cherchons une station sportive.',
+        },
+      },
+    });
+
+    const lead = leadDepuisWebflow(entree);
+    expect(lead.nom).toBe('Marie Dupont');
+    expect(lead.societe).toBe('Mairie de Lyon');
+    expect(lead.ville).toBe('Mairie de Lyon');
+    expect(lead.email).toBe('marie@example.fr');
+    expect(lead.message).toBe('Nous cherchons une station sportive.');
+    expect(lead.leadMagnet).toBe('Subventions - Lead Magnet');
+  });
+
   it('utilise la date du jour si aucune date de soumission n’est fournie', () => {
     const entree = schemaWebflow.parse({ name: 'Contact', data: { Email: 'a@b.fr' } });
     const lead = leadDepuisWebflow(entree);

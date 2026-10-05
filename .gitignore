@@ -16,3 +16,5 @@ data/*.db-shm
 
 .DS_Store
 coverage/
+.vercel
+.env*

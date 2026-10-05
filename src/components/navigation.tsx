@@ -4,6 +4,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import clsx from 'clsx';
+import { clientAuthNavigateur } from '@/lib/auth/browser';
 
 const LIENS = [
   { href: '/', label: 'Vue d’ensemble', icone: '◧' },
@@ -41,6 +42,16 @@ export function Navigation({ orientation = 'verticale' }: { orientation?: 'verti
           </Link>
         );
       })}
+      {process.env.NEXT_PUBLIC_SUPABASE_URL && (
+        <button
+          type="button"
+          onClick={async () => {
+            await clientAuthNavigateur().auth.signOut();
+            window.location.replace('/connexion');
+          }}
+          className="rounded-lg px-2.5 py-2 text-left text-[13px] text-ink-2 hover:bg-surface-2 hover:text-ink"
+        >Déconnexion</button>
+      )}
     </nav>
   );
 }

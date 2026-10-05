@@ -76,6 +76,7 @@ export function filtresDepuisUrl(url: URL): FiltresLeads {
     statut: listeDepuis<Statut>(p, 'statut', STATUTS),
     eligible: booleenDepuis(p, 'eligible'),
     aVerifier: booleenDepuis(p, 'aVerifier'),
+    pointsConfirmes: booleenDepuis(p, 'pointsConfirmes'),
     proprietaire: p.get('proprietaire') ?? undefined,
     q: p.get('q') ?? undefined,
     tri: TRIS_VALIDES.includes(tri as never) ? (tri as FiltresLeads['tri']) : undefined,
