@@ -60,6 +60,8 @@ const MOTS_COLLECTIVITE = [
   'departement', 'region', 'syndicat intercommunal', 'epci', 'collectivite',
   'ville de', 'service des sports', 'service technique', 'etablissement public',
   'college', 'lycee', 'bailleur social',
+  // Formulations vues en production, sans ambiguïté côté entreprise.
+  'hotel de ville', 'conseil municipal', 'services techniques',
 ];
 
 const MOTS_DISTRIBUTEUR = ['distributeur', 'revendeur', 'grossiste', 'dealer', 'reseau de distribution'];
@@ -124,11 +126,67 @@ function premierChamp(champs: Record<string, string>, cles: string[]): string | 
   return null;
 }
 
+/**
+ * Un mot de 3 lettres ou moins (`sav`, `bdr`, `sdr`) doit être isolé : sinon
+ * `sav` se retrouve dans `saintsavin-isere.fr` et classe la commune en client.
+ */
 function contient(texte: string, mots: string[]): string | null {
   for (const mot of mots) {
-    if (texte.includes(mot)) return mot;
+    if (mot.length <= 3) {
+      if (new RegExp(`(?<![a-z0-9])${mot}(?![a-z0-9])`).test(texte)) return mot;
+    } else if (texte.includes(mot)) {
+      return mot;
+    }
   }
   return null;
+}
+
+/** Réduit à `a-z0-9` (minuscules, sans accents ni ponctuation) pour comparer noms et domaines. */
+function compacter(v: string): string {
+  return v
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/** Sous-domaines de second niveau qui précèdent le vrai TLD (`exemple.asso.fr`). */
+const SECONDS_NIVEAUX = new Set(['co', 'com', 'org', 'asso', 'gouv', 'net']);
+
+/** Label principal d'un domaine : la partie juste avant le TLD (`doudeville` pour `doudeville.fr`). */
+function labelPrincipal(domaine: string): string {
+  const parts = domaine.toLowerCase().trim().split('.').filter(Boolean);
+  if (parts.length < 2) return parts[0] ?? '';
+  const avantTld = parts[parts.length - 2]!;
+  if (parts.length >= 3 && SECONDS_NIVEAUX.has(avantTld)) return parts[parts.length - 3]!;
+  return avantTld;
+}
+
+/** Longueur minimale du plus court des deux noms pour accepter une inclusion. */
+const LONGUEUR_MIN_INCLUSION = 6;
+
+/**
+ * Le domaine de l'e-mail évoque-t-il la commune renseignée ? C'est le signal
+ * fiable pour repérer une mairie dont le domaine ne dit pas « mairie »
+ * (`doudeville.fr`, `saintsavin-isere.fr`) : on ne se fie jamais au seul
+ * préfixe `saint…` ou `ville…`, qui toucherait des entreprises.
+ *
+ * Après normalisation (`a-z0-9`), le label principal et la ville se recouvrent
+ * si l'un contient l'autre (ce qui couvre le cas « l'un est préfixe de l'autre »)
+ * et que le plus court fait au moins 6 caractères, ou s'ils sont strictement
+ * égaux (communes courtes : `metz.fr`). Le plancher écarte les labels génériques
+ * (`saint`, `paris` dans `paris-fitness.fr`). Un domaine grand public ne compte jamais.
+ */
+export function domaineEvoqueUneCommune(domaine: string, ville: string | null): boolean {
+  if (!ville) return false;
+  const domaineNormalise = domaine.toLowerCase().trim();
+  if (DOMAINES_GRAND_PUBLIC.has(domaineNormalise)) return false;
+  const label = compacter(labelPrincipal(domaineNormalise));
+  const nomVille = compacter(ville);
+  if (label.length < 3 || nomVille.length < 3) return false;
+  if (label === nomVille) return true;
+  const [court, long] = label.length <= nomVille.length ? [label, nomVille] : [nomVille, label];
+  return court.length >= LONGUEUR_MIN_INCLUSION && long.includes(court);
 }
 
 function lireUtm(url: string | null | undefined): Record<string, string> {
@@ -195,12 +253,17 @@ export function classifier(entree: EntreeClassification): ResultatClassification
       domaine.includes('mairie') ||
       domaine.includes('agglo'));
 
-  if (motCollectivite || domaineCollectivite) {
+  // Domaine de commune sans mot-clé (`doudeville.fr`) : seule la correspondance
+  // avec la ville renseignée est assez fiable pour conclure.
+  const domaineCommunal = domaine != null && domaineEvoqueUneCommune(domaine, ville);
+
+  if (motCollectivite || domaineCollectivite || domaineCommunal) {
     segment = 'collectivite';
     signaux += 2;
-    indices.push(
-      domaineCollectivite ? `domaine public « ${domaine} »` : `mention « ${motCollectivite} »`,
-    );
+    if (domaineCollectivite) indices.push(`domaine public « ${domaine} »`);
+    else if (domaineCommunal) {
+      indices.push(`domaine communal « ${domaine} » correspondant à la ville`);
+    } else indices.push(`mention « ${motCollectivite} »`);
   } else if (domaine && DOMAINES_GRAND_PUBLIC.has(domaine)) {
     // Un domaine grand public sans société renseignée : particulier probable.
     if (societe) {
