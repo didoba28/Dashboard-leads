@@ -164,8 +164,14 @@ export function pointsDuLead(lead: Lead): number {
 }
 
 /**
- * Clé de déduplication : même personne + même ressource + même journée.
- * Volontairement tolérante (téléphone ou société si pas d'e-mail).
+ * Clé de déduplication : même personne, même journée.
+ *
+ * La ressource demandée ne fait volontairement PAS partie de la clé. En
+ * production, un même visiteur remplit couramment le formulaire de contact
+ * puis le simulateur à une minute d'intervalle : deux notifications, mais une
+ * seule demande entrante. L'inclure dans la clé laissait passer ces doublons.
+ *
+ * L'identité est tolérante : e-mail, sinon téléphone, sinon société.
  */
 export function calculerDedupeKey(input: {
   email?: string | null;
@@ -178,8 +184,7 @@ export function calculerDedupeKey(input: {
   const identite =
     normaliser(input.email) ?? normaliser(input.telephone) ?? normaliser(input.societe);
   if (!identite) return null;
-  const ressource = normaliser(input.leadMagnet) ?? input.typeDemande;
-  return `${identite}|${ressource}|${input.dateReception}`;
+  return `${identite}|${input.dateReception}`;
 }
 
 function normaliser(v: string | null | undefined): string | null {
