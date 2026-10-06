@@ -149,14 +149,14 @@ export const REGLES: readonly Regle[] = [
   },
   {
     id: 'inbound.b2b',
-    label: 'Demande entrante B2B / collectivité',
+    label: 'Demande entrante B2B / collectivité / association',
     test: () => true,
     resultat: () => ({
       eligible: true,
       points: 1,
       eligibleActivation: true,
       explication:
-        'Demande entrante d’un prospect B2B ou collectivité non client (formulaire, fiche technique, livre blanc, catalogue, simulateur, appel entrant) : 1 point.',
+        'Demande entrante d’un prospect B2B, d’une collectivité ou d’une association non cliente (formulaire, fiche technique, livre blanc, catalogue, simulateur, appel entrant) : 1 point.',
     }),
   },
 ];

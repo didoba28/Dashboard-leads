@@ -171,7 +171,7 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
             sourceCollecte: patch.sourceCollecte ?? 'notion',
             notionPageId: page.id,
           });
-          const { lead, doublon } = await creerLead(parsed, { dedupliquer: false, validationRequise: true });
+          const { lead, doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
           if (doublon) {
             resultat.ignores++;
           } else {
@@ -212,7 +212,7 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
 }
 
 /** Remonte les leads créés ou modifiés localement vers Notion. */
-export async function pushVersNotion(): Promise<ResultatSync> {
+export async function pushVersNotion(options: { forcer?: boolean } = {}): Promise<ResultatSync> {
   const debut = Date.now();
   const lanceLe = maintenantIso();
   const resultat: ResultatSync = {
@@ -222,7 +222,7 @@ export async function pushVersNotion(): Promise<ResultatSync> {
   try {
     const notion = getNotion();
     const { dataSourceId } = await resoudreCible();
-    for (const lead of await leadsAPousser()) {
+    for (const lead of await leadsAPousser({ tous: options.forcer })) {
       try {
         const properties = versProprietesNotion(lead) as never;
         if (lead.notionPageId) {

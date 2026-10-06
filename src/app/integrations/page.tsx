@@ -34,24 +34,41 @@ export default async function PageIntegrations() {
         <EnteteCarte
           titre="Slack — canal #inbound"
           sousTitre="Chaque message posté dans le canal devient un lead, classé automatiquement"
-          action={<Badge ton={slackConfigure ? 'bon' : 'neutre'}>{slackConfigure ? 'Signature active' : 'Non configuré'}</Badge>}
+          action={
+            <Badge ton={ingestionConfiguree || slackConfigure ? 'bon' : 'neutre'}>
+              {ingestionConfiguree ? 'Make actif' : slackConfigure ? 'Signature active' : 'Non configuré'}
+            </Badge>
+          }
         />
         <div className="space-y-3 px-5 pb-5 text-xs text-ink-2">
-          <ol className="list-decimal space-y-1.5 pl-4">
-            <li>
-              Créez une application Slack, activez <strong className="text-ink">Event Subscriptions</strong> et
-              abonnez-vous à <code className="rounded bg-surface-2 px-1">message.channels</code> (ou{' '}
-              <code className="rounded bg-surface-2 px-1">message.groups</code> pour un canal privé).
-            </li>
-            <li>Renseignez l’URL de réception ci-dessous. Slack vérifie l’URL puis envoie les messages.</li>
-            <li>
-              Copiez le <strong className="text-ink">Signing Secret</strong> dans{' '}
-              <code className="rounded bg-surface-2 px-1">SLACK_SIGNING_SECRET</code> : chaque requête est
-              vérifiée, une requête non signée est rejetée.
-            </li>
-            <li>Invitez l’application dans le canal #inbound.</li>
-          </ol>
-          <BlocCode label="URL de réception des événements" contenu={`${base}/api/ingest/slack`} />
+          <p>
+            <strong className="text-ink">Avec Make :</strong> utilisez le module Slack comme déclencheur, puis
+            envoyez une requête HTTP POST avec l’en-tête{' '}
+            <code className="rounded bg-surface-2 px-1">Authorization: Bearer INGEST_TOKEN</code>.
+            Aucun Signing Secret Slack n’est nécessaire dans ce mode.
+          </p>
+          <BlocCode label="URL HTTP pour Make" contenu={`${base}/api/ingest/slack`} />
+          <BlocCode
+            label="Corps JSON conseillé"
+            contenu={'{\n  "text": "message Slack",\n  "blockText1": "texte du premier bloc",\n  "blockText2": "premier champ du second bloc",\n  "blockText3": "deuxième champ du second bloc",\n  "botId": "identifiant du bot Slack",\n  "origine": "nom précis du formulaire si disponible",\n  "channel": "#inbound",\n  "ts": "horodatage du message"\n}'}
+          />
+          <p>
+            Mappez <code className="rounded bg-surface-2 px-1">blocks</code> et{' '}
+            <code className="rounded bg-surface-2 px-1">attachments</code> depuis Slack : c’est là que se trouvent
+            souvent le téléphone, l’e-mail, le budget et les réponses du formulaire. Mappez aussi le nom du bot ou de
+            l’application dans <code className="rounded bg-surface-2 px-1">botName</code>. Si Make ne fournit pas le
+            nom du formulaire, renseignez « Simulateur », « Livre blanc », etc. dans{' '}
+            <code className="rounded bg-surface-2 px-1">origine</code>.
+          </p>
+          <details className="rounded-lg border border-hair bg-surface-2 px-3 py-2">
+            <summary className="cursor-pointer font-medium text-ink">Connexion directe sans Make</summary>
+            <p className="mt-2">
+              Une application Slack peut aussi appeler cette URL directement avec Event Subscriptions. Dans ce cas,
+              configurez <code className="rounded bg-surface px-1">SLACK_SIGNING_SECRET</code> et abonnez-vous à{' '}
+              <code className="rounded bg-surface px-1">message.channels</code> ou{' '}
+              <code className="rounded bg-surface px-1">message.groups</code>.
+            </p>
+          </details>
           <p>
             Les messages sont classés automatiquement (segment, type de demande, initiative). En dessous
             de 60 % de confiance, le lead est marqué « à vérifier » plutôt que scoré sur une supposition.

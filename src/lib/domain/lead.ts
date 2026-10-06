@@ -164,22 +164,67 @@ export function pointsDuLead(lead: Lead): number {
 }
 
 /**
- * Clé de déduplication : même personne + même ressource + même journée.
- * Volontairement tolérante (téléphone ou société si pas d'e-mail).
+ * Clé de déduplication : même personne, indépendamment de l'origine.
+ * La fenêtre de dates est appliquée par le dépôt de données. Ainsi, un même
+ * e-mail capté par Slack puis par Gmail le même jour ne crée qu'un lead.
  */
 export function calculerDedupeKey(input: {
+  nom?: string | null;
   email?: string | null;
   telephone?: string | null;
   societe?: string | null;
+  ville?: string | null;
+  sourceCollecte?: string | null;
   typeDemande: string;
   leadMagnet?: string | null;
   dateReception: string;
 }): string | null {
-  const identite =
-    normaliser(input.email) ?? normaliser(input.telephone) ?? normaliser(input.societe);
-  if (!identite) return null;
-  const ressource = normaliser(input.leadMagnet) ?? input.typeDemande;
-  return `${identite}|${ressource}|${input.dateReception}`;
+  const email = normaliser(input.email);
+  const emailTechnique = estEmailTechnique(input.email);
+  if (email && !emailTechnique) return email;
+
+  // Les notifications transférées contiennent souvent le téléphone d'un
+  // collaborateur AirFit dans la signature. Ne jamais l'utiliser comme identité
+  // quand l'e-mail détecté est lui-même une adresse technique.
+  const telephone = normaliser(input.telephone);
+  if (telephone && !emailTechnique) return telephone;
+
+  const nom = normaliser(input.nom);
+  const ville = normaliser(input.ville);
+  if (nom && ville) return `nom:${nom}|ville:${ville}`;
+  return null;
+}
+
+/** Adresses de transport/signature qui ne désignent jamais le prospect. */
+export function estEmailTechnique(email: string | null | undefined): boolean {
+  const valeur = email?.trim().toLowerCase();
+  if (!valeur) return false;
+  const [local, domaine] = valeur.split('@');
+  return domaine === 'airfit.co' ||
+    local === 'no-reply' ||
+    local === 'noreply' ||
+    valeur === 'no-reply-forms@webflow.com' ||
+    valeur === 'form-spam-reports@support.webflow.com';
+}
+
+/** Toutes les identités fiables utilisées pour rapprocher deux canaux. */
+export function clesIdentiteDedupe(input: {
+  nom?: string | null;
+  email?: string | null;
+  telephone?: string | null;
+  ville?: string | null;
+}): string[] {
+  const cles: string[] = [];
+  const emailTechnique = estEmailTechnique(input.email);
+  const email = normaliser(input.email);
+  const telephone = normaliser(input.telephone);
+  const nom = normaliser(input.nom);
+  const ville = normaliser(input.ville);
+
+  if (email && !emailTechnique) cles.push(`email:${email}`);
+  if (telephone && !emailTechnique) cles.push(`telephone:${telephone}`);
+  if (nom && ville) cles.push(`nom-ville:${nom}|${ville}`);
+  return cles;
 }
 
 function normaliser(v: string | null | undefined): string | null {

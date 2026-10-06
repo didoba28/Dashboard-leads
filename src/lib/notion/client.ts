@@ -6,7 +6,7 @@ let instance: Client | null = null;
 export class NotionNonConfigure extends Error {
   constructor() {
     super(
-      "Notion n'est pas configuré : renseignez NOTION_TOKEN (et NOTION_DATABASE_ID ou NOTION_PARENT_PAGE_ID) dans .env.local.",
+      "Notion n'est pas configuré : renseignez NOTION_TOKEN dans Vercel (Production) ou dans .env.local en développement.",
     );
     this.name = 'NotionNonConfigure';
   }

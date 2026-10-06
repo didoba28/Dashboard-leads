@@ -30,7 +30,7 @@ describe('leadDepuisFormulaire', () => {
       message: 'Je voudrais un devis pour mon jardin personnel.',
       champs,
     });
-    expect(leadDepuisFormulaire(sansOverride).segment).toBe('b2c');
+    expect(leadDepuisFormulaire(sansOverride).segment).toBe('b2b');
 
     const entree = schemaFormulaire.parse({
       sujet: 'Demande de devis',

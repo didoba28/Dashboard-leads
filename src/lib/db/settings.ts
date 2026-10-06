@@ -21,7 +21,7 @@ export interface Reglages {
 export const REGLAGES_DEFAUT: Reglages = {
   periodeActive: '2026-Q4',
   arbitrageB2cNewsletter: 'newsletter',
-  fenetreDedupeJours: 30,
+  fenetreDedupeJours: 1,
   notionDatabaseId: null,
   notionDataSourceId: null,
   notionDernierPull: null,

@@ -58,7 +58,7 @@ export function PanneauNotion({ etat }: { etat: EtatNotion }) {
   async function synchroniser(direction?: 'pull' | 'push') {
     try {
       const data = await appeler(
-        `/api/notion/sync${direction ? `?direction=${direction}` : ''}`,
+        `/api/notion/sync${direction ? `?direction=${direction}${direction === 'push' ? '&force=true' : ''}` : ''}`,
         {},
         direction ?? 'sync',
       );
@@ -113,10 +113,11 @@ export function PanneauNotion({ etat }: { etat: EtatNotion }) {
                 .
               </li>
               <li>
-                Copiez le jeton secret dans <code className="rounded bg-surface px-1">NOTION_TOKEN</code> du fichier{' '}
-                <code className="rounded bg-surface px-1">.env.local</code>, puis redémarrez l’application.
+                Dans Vercel, ouvrez Settings → Environment Variables et ajoutez le jeton secret sous le nom{' '}
+                <code className="rounded bg-surface px-1">NOTION_TOKEN</code> pour Production, puis redéployez.
               </li>
-              <li>Partagez la page Notion parente avec cette intégration.</li>
+              <li>Dans Notion, partagez la page parente avec cette intégration via « Connexions ».</li>
+              <li>Revenez ici : laissez « ID de base » vide, collez l’ID de la page parente, puis cliquez sur « Connecter la base ».</li>
             </ol>
           </div>
         ) : null}

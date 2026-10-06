@@ -6,7 +6,7 @@
  */
 
 /** Segment du prospect. `collectivite` = B2G (mairies, CCAS, agglomérations…). */
-export const SEGMENTS = ['b2b', 'b2c', 'collectivite'] as const;
+export const SEGMENTS = ['b2b', 'b2c', 'collectivite', 'association'] as const;
 export type Segment = (typeof SEGMENTS)[number];
 
 /** Relation commerciale existante avec le compte au moment de la demande. */
@@ -92,6 +92,7 @@ export const LABELS_SEGMENT: Record<Segment, string> = {
   b2b: 'B2B',
   b2c: 'B2C',
   collectivite: 'Collectivité',
+  association: 'Association',
 };
 
 export const LABELS_RELATION: Record<Relation, string> = {

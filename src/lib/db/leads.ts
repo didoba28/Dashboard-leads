@@ -1,13 +1,23 @@
 /** Dépôt de données des leads : lecture, écriture, filtres et déduplication. */
-import { getDb, maintenantIso, nouvelId } from './index';
+import { getDb, maintenantIso, nouvelId, type PiloteDonnees } from './index';
 import {
   calculerDedupeKey,
+  clesIdentiteDedupe,
   type Lead,
   type LeadParsed,
   aujourdHui,
 } from '@/lib/domain/lead';
 import { scorerLead } from '@/lib/domain/scoring';
+import {
+  AUTEUR_VALIDATION_AUTOMATIQUE,
+  evaluerValidationAutomatique,
+} from '@/lib/domain/automation';
 import { construirePeriode } from '@/lib/domain/periods';
+import {
+  extraireIdentiteNotificationSlack,
+  leadDepuisMessageSlack,
+  parametresDepuisPayloadSlackMake,
+} from '@/lib/ingest/slack';
 import { lireReglages } from './settings';
 import type {
   Initiative,
@@ -115,6 +125,120 @@ function parseJson<T>(brut: string, defaut: T): T {
     return JSON.parse(brut) as T;
   } catch {
     return defaut;
+  }
+}
+
+/**
+ * Applique la règle métier courante aux lignes historiques sans toucher aux
+ * points déjà confirmés : tous les leads issus de Slack sont des collectivités.
+ */
+async function normaliserSegmentsSlack(db: PiloteDonnees): Promise<void> {
+  await db.run(
+    `UPDATE leads
+     SET segment = 'collectivite', updated_at = ?
+     WHERE source_collecte = 'slack_inbound'
+       AND deleted_at IS NULL
+       AND segment <> 'collectivite'`,
+    [maintenantIso()],
+  );
+}
+
+/**
+ * Répare à la lecture les anciennes notifications Slack créées avant la prise
+ * en charge du titre compact et des blocs détaillant l'origine du lead.
+ * Une identité déjà saisie et un type déjà qualifié ne sont jamais remplacés.
+ */
+async function reparerLeadsSlackAnciens(
+  db: PiloteDonnees,
+  lignes: LigneLead[],
+): Promise<void> {
+  const idsModifies = new Set<string>();
+
+  for (const ligne of lignes) {
+    if (ligne.source_collecte !== 'slack_inbound') continue;
+
+    if (!ligne.nom?.trim() && ligne.message) {
+      const identite = extraireIdentiteNotificationSlack(ligne.message);
+      if (identite.nom) {
+        const maintenant = maintenantIso();
+        const resultat = await db.run(
+          `UPDATE leads
+           SET nom = COALESCE(NULLIF(TRIM(nom), ''), ?),
+               ville = COALESCE(NULLIF(TRIM(ville), ''), ?),
+               updated_at = ?
+           WHERE id = ? AND deleted_at IS NULL AND (nom IS NULL OR TRIM(nom) = '')`,
+          [identite.nom, identite.ville, maintenant, ligne.id],
+        );
+        if (resultat.changes > 0) idsModifies.add(ligne.id);
+      }
+    }
+
+    // Certaines anciennes notifications « Nouveau contact AirFit » ont été
+    // enregistrées comme clients alors qu'elles étaient encore signalées à
+    // vérifier. Tant qu'aucun humain n'a confirmé ce classement, le message
+    // structuré #inbound fait foi et le contact redevient un prospect.
+    if (
+      ligne.relation === 'client' &&
+      Boolean(ligne.validation_requise) &&
+      !Boolean(ligne.points_confirmes) &&
+      Boolean(ligne.a_verifier) &&
+      ligne.message &&
+      /^\s*(?:\*+)?nouveau\s+(?:lead|contact)\s+airfit\b/im.test(ligne.message)
+    ) {
+      try {
+        const analyse = leadDepuisMessageSlack({
+          texte: ligne.message,
+          blocs: null,
+          ts: String(Date.now() / 1000),
+          canal: '#inbound',
+        });
+        if (analyse.relation === 'prospect' && analyse.initiative === 'inbound_site') {
+          const maj = await mettreAJourLead(ligne.id, { relation: 'prospect' });
+          if (maj) idsModifies.add(ligne.id);
+        }
+      } catch {
+        // Une réparation incertaine ne doit jamais modifier le classement.
+      }
+    }
+
+    if (ligne.type_demande !== 'formulaire_contact' || !ligne.raw_payload) continue;
+    const raw = parseJson<Record<string, unknown> | null>(ligne.raw_payload, null);
+    if (!raw) continue;
+
+    try {
+      const evenement = raw['evenement'];
+      const params = evenement
+        ? parametresDepuisPayloadSlackMake(evenement)
+        : {
+            texte: ligne.message ?? '',
+            blocs: raw['blocs'],
+            ts: typeof raw['ts'] === 'string' ? raw['ts'] : String(Date.now() / 1000),
+            canal: typeof raw['canal'] === 'string' ? raw['canal'] : 'inconnu',
+          };
+      const analyse = leadDepuisMessageSlack(params);
+      if (analyse.typeDemande === 'formulaire_contact') continue;
+
+      const maj = await mettreAJourLead(ligne.id, {
+        typeDemande: analyse.typeDemande,
+        leadMagnet: analyse.leadMagnet,
+        message: analyse.message,
+      });
+      if (maj) idsModifies.add(ligne.id);
+    } catch {
+      // Un ancien payload partiel reste affichable : il ne doit jamais bloquer la liste.
+    }
+  }
+
+  if (idsModifies.size === 0) return;
+  const ids = [...idsModifies];
+  const rafraichies = await db.all<LigneLead>(
+    `SELECT ${COLONNES} FROM leads WHERE id IN (${ids.map(() => '?').join(', ')})`,
+    ids,
+  );
+  const parId = new Map(rafraichies.map((ligne) => [ligne.id, ligne]));
+  for (const ligne of lignes) {
+    const actualisee = parId.get(ligne.id);
+    if (actualisee) Object.assign(ligne, actualisee);
   }
 }
 
@@ -229,6 +353,7 @@ export async function listerLeads(
   filtres: FiltresLeads = {},
 ): Promise<{ leads: Lead[]; total: number }> {
   const db = await getDb();
+  await normaliserSegmentsSlack(db);
   const where = construireWhere(filtres);
   const tri = TRIS[filtres.tri ?? 'date_desc'];
   const limite = Math.min(Math.max(filtres.limite ?? 100, 1), 1000);
@@ -246,17 +371,21 @@ export async function listerLeads(
     [...where.params, limite, offset],
   );
 
+  await reparerLeadsSlackAnciens(db, lignes);
+
   return { leads: lignes.map(versLead), total };
 }
 
 /** Tous les leads correspondant aux filtres, sans pagination (agrégations). */
 export async function listerTousLeads(filtres: FiltresLeads = {}): Promise<Lead[]> {
   const db = await getDb();
+  await normaliserSegmentsSlack(db);
   const where = construireWhere(filtres);
   const lignes = await db.all<LigneLead>(
     `SELECT ${COLONNES} FROM leads WHERE ${where.sql} ORDER BY date_reception ASC`,
     where.params,
   );
+  await reparerLeadsSlackAnciens(db, lignes);
   return lignes.map(versLead);
 }
 
@@ -281,19 +410,56 @@ export async function lireLeadParNotionPageId(notionPageId: string): Promise<Lea
 /** Cherche un doublon récent sur la même clé de déduplication. */
 export async function trouverDoublon(
   dedupeKey: string | null,
+  dateReference: string,
   fenetreJours?: number,
 ): Promise<Lead | null> {
   if (!dedupeKey) return null;
   const db = await getDb();
   const fenetre = fenetreJours ?? (await lireReglages()).fenetreDedupeJours;
-  const depuis = new Date(Date.now() - fenetre * 86_400_000).toISOString().slice(0, 10);
+  if (fenetre <= 0) return null;
+  const date = new Date(`${dateReference}T00:00:00.000Z`);
+  const depuis = new Date(date.getTime() - fenetre * 86_400_000).toISOString().slice(0, 10);
+  const jusqua = new Date(date.getTime() + fenetre * 86_400_000).toISOString().slice(0, 10);
   const ligne = await db.get<LigneLead>(
     `SELECT ${COLONNES} FROM leads
-     WHERE dedupe_key = ? AND date_reception >= ? AND deleted_at IS NULL
+     WHERE dedupe_key = ? AND date_reception >= ? AND date_reception <= ? AND deleted_at IS NULL
      ORDER BY date_reception DESC LIMIT 1`,
-    [dedupeKey, depuis],
+    [dedupeKey, depuis, jusqua],
   );
   return ligne ? versLead(ligne) : null;
+}
+
+function normaliserMessageDedupe(message: string | null | undefined): string | null {
+  const normalise = message?.toLowerCase().replace(/\s+/g, ' ').trim();
+  return normalise && normalise.length >= 10 ? normalise : null;
+}
+
+/**
+ * Rapproche aussi deux canaux dont la clé principale diffère, par exemple un
+ * Slack sans e-mail puis une saisie enrichie avec e-mail pour le même nom/ville.
+ */
+async function trouverDoublonParIdentite(input: LeadParsed, dateReference: string): Promise<Lead | null> {
+  const fenetre = (await lireReglages()).fenetreDedupeJours;
+  if (fenetre <= 0) return null;
+  const date = new Date(`${dateReference}T00:00:00.000Z`);
+  const depuis = new Date(date.getTime() - fenetre * 86_400_000).toISOString().slice(0, 10);
+  const jusqua = new Date(date.getTime() + fenetre * 86_400_000).toISOString().slice(0, 10);
+  const db = await getDb();
+  const candidats = await db.all<LigneLead>(
+    `SELECT ${COLONNES} FROM leads
+     WHERE date_reception >= ? AND date_reception <= ? AND deleted_at IS NULL
+     ORDER BY created_at ASC`,
+    [depuis, jusqua],
+  );
+  const cles = new Set(clesIdentiteDedupe(input));
+  const message = normaliserMessageDedupe(input.message);
+
+  for (const ligne of candidats) {
+    const candidat = versLead(ligne);
+    if (clesIdentiteDedupe(candidat).some((cle) => cles.has(cle))) return candidat;
+    if (message && normaliserMessageDedupe(candidat.message) === message) return candidat;
+  }
+  return null;
 }
 
 async function appliquerScoring(champs: {
@@ -320,6 +486,56 @@ export interface ResultatCreation {
   doublon: boolean;
 }
 
+function candidatAutomatisationDepuisInput(input: LeadParsed) {
+  return {
+    aVerifier: input.aVerifier ?? false,
+    confiance: input.confiance ?? null,
+    email: input.email ?? null,
+    telephone: input.telephone ?? null,
+    sourceCollecte: input.sourceCollecte,
+    typeDemande: input.typeDemande,
+    leadMagnet: input.leadMagnet ?? null,
+  };
+}
+
+/** Complète un doublon sans écraser une valeur déjà qualifiée. */
+function enrichissementSansEcrasement(existant: Lead, input: LeadParsed): Partial<LeadParsed> {
+  const patch: Partial<LeadParsed> = {};
+  const champs: Array<
+    keyof Pick<
+      LeadParsed,
+      'nom' | 'email' | 'telephone' | 'societe' | 'fonction' | 'ville' |
+      'campagne' | 'leadMagnet' | 'proprietaire'
+    >
+  > = ['nom', 'email', 'telephone', 'societe', 'fonction', 'ville', 'campagne', 'leadMagnet', 'proprietaire'];
+
+  for (const champ of champs) {
+    if (!existant[champ] && input[champ]) patch[champ] = input[champ] as never;
+  }
+  if (existant.typeDemande === 'formulaire_contact' && input.typeDemande !== 'formulaire_contact') {
+    patch.typeDemande = input.typeDemande;
+  }
+  if (existant.initiative === 'inconnue' && input.initiative !== 'inconnue') {
+    patch.initiative = input.initiative;
+  }
+  if ((input.confiance ?? 0) > (existant.confiance ?? 0)) {
+    patch.confiance = input.confiance;
+    if (input.aVerifier === false) patch.aVerifier = false;
+  }
+
+  const tags = [...new Set([...existant.tags, ...(input.tags ?? [])])];
+  if (tags.length !== existant.tags.length) patch.tags = tags;
+
+  const nouveauMessage = input.message?.trim();
+  if (nouveauMessage && !existant.message?.includes(nouveauMessage)) {
+    patch.message = existant.message
+      ? `${existant.message}\n\n--- Nouvelle occurrence ---\n${nouveauMessage}`.slice(0, 5000)
+      : nouveauMessage.slice(0, 5000);
+  }
+  if (existant.rawPayload == null && input.rawPayload !== undefined) patch.rawPayload = input.rawPayload;
+  return patch;
+}
+
 export async function creerLead(
   input: LeadParsed,
   options: OptionsCreation = {},
@@ -328,21 +544,37 @@ export async function creerLead(
   const dateReception = input.dateReception ?? aujourdHui();
   const score = await appliquerScoring(input);
   const dedupeKey = calculerDedupeKey({
+    nom: input.nom ?? null,
     email: input.email ?? null,
     telephone: input.telephone ?? null,
     societe: input.societe ?? null,
+    ville: input.ville ?? null,
+    sourceCollecte: input.sourceCollecte,
     typeDemande: input.typeDemande,
     leadMagnet: input.leadMagnet ?? null,
     dateReception,
   });
 
   if (options.dedupliquer !== false) {
-    const existant = await trouverDoublon(dedupeKey);
-    if (existant) return { lead: existant, doublon: true };
+    const existant =
+      (await trouverDoublon(dedupeKey, dateReception)) ??
+      (await trouverDoublonParIdentite(input, dateReception));
+    if (existant) {
+      const patch = enrichissementSansEcrasement(existant, input);
+      const enrichi = Object.keys(patch).length > 0
+        ? (await mettreAJourLead(existant.id, patch)) ?? existant
+        : existant;
+      const valide = await validerLeadAutomatiquementSiEligible(enrichi.id);
+      return { lead: valide ?? enrichi, doublon: true };
+    }
   }
 
   const now = maintenantIso();
   const id = options.id ?? nouvelId();
+  const decisionAutomatique = options.validationRequise
+    ? evaluerValidationAutomatique(candidatAutomatisationDepuisInput(input))
+    : null;
+  const pointsConfirmes = !options.validationRequise || decisionAutomatique?.valider === true;
   const params: unknown[] = [
     id,
     dateReception,
@@ -374,8 +606,10 @@ export async function creerLead(
     input.pointsOverride ?? null,
     input.pointsOverrideRaison ?? null,
     options.validationRequise ? 1 : 0,
-    options.validationRequise ? 0 : 1,
-    input.aVerifier ? 1 : 0,
+    pointsConfirmes ? 1 : 0,
+    decisionAutomatique?.valider ? now : null,
+    decisionAutomatique?.valider ? AUTEUR_VALIDATION_AUTOMATIQUE : null,
+    decisionAutomatique?.valider ? 0 : (input.aVerifier ? 1 : 0),
     input.confiance ?? null,
     dedupeKey,
     input.notionPageId ?? null,
@@ -384,23 +618,33 @@ export async function creerLead(
     now,
   ];
 
-  await db.run(
+  const insertion = await db.run(
     `INSERT INTO leads (
       id, date_reception, nom, email, telephone, societe, fonction, ville, segment, relation,
       type_demande, initiative, source_collecte, campagne, lead_magnet, message, statut,
       type_activation, date_activation, proprietaire, tags, eligible, points, eligible_activation,
       regle_id, regle_label, explication, points_override, points_override_raison,
-      validation_requise, points_confirmes, a_verifier,
+      validation_requise, points_confirmes, points_confirmes_le, points_confirmes_par, a_verifier,
       confiance, dedupe_key, notion_page_id, notion_last_synced_at, raw_payload, created_at, updated_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, NULL, ?, ?, ?
-    )`,
+      ?, ?, ?, ?, ?, NULL, ?, ?, ?
+    ) ON CONFLICT DO NOTHING`,
     params,
   );
+
+  // Le verrou SQL absorbe deux webhooks arrivés exactement en parallèle.
+  if (insertion.changes === 0) {
+    const concurrent =
+      (await trouverDoublon(dedupeKey, dateReception)) ??
+      (await trouverDoublonParIdentite(input, dateReception)) ??
+      (await lireLead(id));
+    if (!concurrent) throw new Error("Le lead n'a pas pu être créé après un conflit de déduplication.");
+    return { lead: concurrent, doublon: true };
+  }
 
   return { lead: (await lireLead(id))!, doublon: false };
 }
@@ -502,9 +746,12 @@ export async function mettreAJourLead(
 
   // La clé de dédup suit l'identité et la ressource.
   const dedupeKey = calculerDedupeKey({
+    nom: patch.nom !== undefined ? patch.nom : actuel.nom,
     email: patch.email !== undefined ? patch.email : actuel.email,
     telephone: patch.telephone !== undefined ? patch.telephone : actuel.telephone,
     societe: patch.societe !== undefined ? patch.societe : actuel.societe,
+    ville: patch.ville !== undefined ? patch.ville : actuel.ville,
+    sourceCollecte: patch.sourceCollecte ?? actuel.sourceCollecte,
     typeDemande: dimensions.typeDemande,
     leadMagnet: patch.leadMagnet !== undefined ? patch.leadMagnet : actuel.leadMagnet,
     dateReception: patch.dateReception ?? actuel.dateReception,
@@ -524,6 +771,91 @@ export async function mettreAJourLead(
   return lireLead(id);
 }
 
+/** Confirme un lead automatisé uniquement s'il satisfait encore toutes les sécurités. */
+export async function validerLeadAutomatiquementSiEligible(id: string): Promise<Lead | null> {
+  const lead = await lireLead(id);
+  if (!lead || !lead.validationRequise || lead.pointsConfirmes) return lead;
+  const decision = evaluerValidationAutomatique(lead);
+  if (!decision.valider) return lead;
+
+  const db = await getDb();
+  const maintenant = maintenantIso();
+  await db.run(
+    `UPDATE leads SET points_confirmes = ?, points_confirmes_le = ?,
+       points_confirmes_par = ?, a_verifier = ?, updated_at = ?
+     WHERE id = ? AND deleted_at IS NULL AND validation_requise = ? AND points_confirmes = ?`,
+    [1, maintenant, AUTEUR_VALIDATION_AUTOMATIQUE, 0, maintenant, id, 1, 0],
+  );
+  return lireLead(id);
+}
+
+export interface ResultatRetraitementAutomatique {
+  examines: number;
+  valides: number;
+  clesDedupeActualisees: number;
+}
+
+/**
+ * Migration applicative idempotente des anciennes lignes : met à niveau les
+ * clés de déduplication, puis valide seulement les leads désormais fiables.
+ */
+export async function retraiterAutomatisationHistorique(): Promise<ResultatRetraitementAutomatique> {
+  const db = await getDb();
+  const lignes = await db.all<LigneLead>(`SELECT ${COLONNES} FROM leads WHERE deleted_at IS NULL`);
+  let valides = 0;
+  let clesDedupeActualisees = 0;
+
+  for (const ligne of lignes) {
+    const lead = versLead(ligne);
+    const dedupeKey = calculerDedupeKey({
+      nom: lead.nom,
+      email: lead.email,
+      telephone: lead.telephone,
+      societe: lead.societe,
+      ville: lead.ville,
+      sourceCollecte: lead.sourceCollecte,
+      typeDemande: lead.typeDemande,
+      leadMagnet: lead.leadMagnet,
+      dateReception: lead.dateReception,
+    });
+    if (dedupeKey !== lead.dedupeKey) {
+      await db.run('UPDATE leads SET dedupe_key = ? WHERE id = ? AND deleted_at IS NULL', [dedupeKey, lead.id]);
+      clesDedupeActualisees++;
+    }
+
+    if (!lead.validationRequise || lead.pointsConfirmes) continue;
+    if (!evaluerValidationAutomatique(lead).valider) continue;
+    const maintenant = maintenantIso();
+    const resultat = await db.run(
+      `UPDATE leads SET points_confirmes = ?, points_confirmes_le = ?,
+         points_confirmes_par = ?, a_verifier = ?, updated_at = ?
+       WHERE id = ? AND deleted_at IS NULL AND validation_requise = ? AND points_confirmes = ?`,
+      [1, maintenant, AUTEUR_VALIDATION_AUTOMATIQUE, 0, maintenant, lead.id, 1, 0],
+    );
+    valides += resultat.changes;
+  }
+
+  return { examines: lignes.length, valides, clesDedupeActualisees };
+}
+
+/** Derniers leads confirmés par l'automatisation, pour le mini rapport UI. */
+export async function listerValidationsAutomatiques(limite = 10): Promise<{ leads: Lead[]; total: number }> {
+  const db = await getDb();
+  const borne = Math.min(Math.max(limite, 1), 50);
+  const ligneTotal = await db.get<{ n: number | string }>(
+    `SELECT COUNT(*) AS n FROM leads
+     WHERE deleted_at IS NULL AND points_confirmes = ? AND points_confirmes_par = ?`,
+    [1, AUTEUR_VALIDATION_AUTOMATIQUE],
+  );
+  const lignes = await db.all<LigneLead>(
+    `SELECT ${COLONNES} FROM leads
+     WHERE deleted_at IS NULL AND points_confirmes = ? AND points_confirmes_par = ?
+     ORDER BY points_confirmes_le DESC, date_reception DESC LIMIT ?`,
+    [1, AUTEUR_VALIDATION_AUTOMATIQUE, borne],
+  );
+  return { leads: lignes.map(versLead), total: Number(ligneTotal?.n ?? 0) };
+}
+
 /** Confirme le score actuellement proposé, sans accepter de score depuis le client. */
 export async function confirmerPointsLead(id: string, email: string): Promise<Lead | null> {
   const db = await getDb();
@@ -535,6 +867,22 @@ export async function confirmerPointsLead(id: string, email: string): Promise<Le
     [1, maintenant, email, maintenant, id, 1, 0],
   );
   return resultat.changes > 0 ? lireLead(id) : null;
+}
+
+/** Confirme en une seule requête les leads automatisés encore en attente. */
+export async function confirmerPointsLeads(ids: string[], email: string): Promise<number> {
+  const uniques = [...new Set(ids)];
+  if (uniques.length === 0) return 0;
+  const db = await getDb();
+  const maintenant = maintenantIso();
+  const resultat = await db.run(
+    `UPDATE leads SET points_confirmes = ?, points_confirmes_le = ?,
+       points_confirmes_par = ?, updated_at = ?
+     WHERE id IN (${uniques.map(() => '?').join(', ')})
+       AND deleted_at IS NULL AND validation_requise = ? AND points_confirmes = ?`,
+    [1, maintenant, email, maintenant, ...uniques, 1, 0],
+  );
+  return resultat.changes;
 }
 
 export async function marquerSynchronise(
@@ -559,13 +907,27 @@ export async function supprimerLead(id: string): Promise<boolean> {
   return res.changes > 0;
 }
 
+/** Supprime logiquement plusieurs leads en une seule requête. */
+export async function supprimerLeads(ids: string[]): Promise<number> {
+  const uniques = [...new Set(ids)];
+  if (uniques.length === 0) return 0;
+  const db = await getDb();
+  const maintenant = maintenantIso();
+  const resultat = await db.run(
+    `UPDATE leads SET deleted_at = ?, updated_at = ?
+     WHERE id IN (${uniques.map(() => '?').join(', ')}) AND deleted_at IS NULL`,
+    [maintenant, maintenant, ...uniques],
+  );
+  return resultat.changes;
+}
+
 /** Leads modifiés localement depuis la dernière synchronisation Notion. */
-export async function leadsAPousser(): Promise<Lead[]> {
+export async function leadsAPousser(options: { tous?: boolean } = {}): Promise<Lead[]> {
   const db = await getDb();
   const lignes = await db.all<LigneLead>(
     `SELECT ${COLONNES} FROM leads
      WHERE deleted_at IS NULL
-       AND (notion_page_id IS NULL OR notion_last_synced_at IS NULL OR updated_at > notion_last_synced_at)
+       ${options.tous ? '' : 'AND (notion_page_id IS NULL OR notion_last_synced_at IS NULL OR updated_at > notion_last_synced_at)'}
      ORDER BY updated_at ASC`,
   );
   return lignes.map(versLead);

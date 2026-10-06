@@ -29,6 +29,7 @@ import { scorerLead } from '@/lib/domain/scoring';
 import type { Lead } from '@/lib/domain/lead';
 import { Bouton, Champ, Entree, Selection, ZoneTexte } from '@/components/ui/primitives';
 import { useToasts } from '@/components/ui/toast';
+import { DetailsAutomatisation } from './details-automatisation';
 import { AperçuScore } from './apercu-score';
 
 export interface ValeursLead {
@@ -217,17 +218,7 @@ export function FormulaireLead({
           enAttente={Boolean(lead?.validationRequise && !lead.pointsConfirmes)}
         />
 
-        {lead?.rawPayload ? (
-          <section className="space-y-2 rounded-lg border border-hair bg-surface-2 p-3.5">
-            <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-              Détails reçus de l’automatisation
-            </h3>
-            <p className="text-xs text-ink-2">Source : {LABELS_SOURCE_COLLECTE[lead.sourceCollecte]}</p>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface px-3 py-2 text-xs text-ink-2">
-              {JSON.stringify(lead.rawPayload, null, 2)}
-            </pre>
-          </section>
-        ) : null}
+        {lead?.rawPayload ? <DetailsAutomatisation lead={lead} /> : null}
 
         <section className="space-y-3">
           <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Qualification</h3>

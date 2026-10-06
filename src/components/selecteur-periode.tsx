@@ -19,6 +19,7 @@ export function SelecteurPeriode({
   const chemin = usePathname();
   const params = useSearchParams();
   const [enCours, demarrer] = useTransition();
+  const periodesTriees = [...periodes].sort((a, b) => b.id.localeCompare(a.id));
 
   function changer(periode: string) {
     const suivants = new URLSearchParams(params.toString());
@@ -38,7 +39,7 @@ export function SelecteurPeriode({
         className="h-8 w-36 text-xs"
         aria-busy={enCours}
       >
-        {periodes.map((p) => (
+        {periodesTriees.map((p) => (
           <option key={p.id} value={p.id}>
             {p.label}
           </option>

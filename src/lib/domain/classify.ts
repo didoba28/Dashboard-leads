@@ -62,6 +62,11 @@ const MOTS_COLLECTIVITE = [
   'college', 'lycee', 'bailleur social',
 ];
 
+const MOTS_ASSOCIATION = [
+  'association', 'asso ', 'club sportif', 'club de sport', 'federation',
+  'fondation', 'organisme sans but lucratif', 'loi 1901',
+];
+
 const MOTS_DISTRIBUTEUR = ['distributeur', 'revendeur', 'grossiste', 'dealer', 'reseau de distribution'];
 const MOTS_CLIENT = ['renouvellement', 'deja client', 'notre commande', 'sav', 'apres-vente'];
 
@@ -90,7 +95,8 @@ const REGLES_INITIATIVE: Array<{ initiative: Initiative; mots: string[] }> = [
 ];
 
 const RE_EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/;
-const RE_TEL = /(?:(?:\+33|0033)\s?[1-9]|0[1-9])(?:[\s.-]?\d{2}){4}/;
+const RE_EMAIL_GLOBAL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
+const RE_TEL = /(?:(?:\+|00)[1-9]\d{0,2}(?:[\s.-]?\d){7,12}|0[1-9](?:[\s.-]?\d{2}){4})/;
 
 /** Normalise pour la recherche : minuscules, sans accents, espaces compactés. */
 export function normaliserTexte(v: string): string {
@@ -106,7 +112,8 @@ export function normaliserTexte(v: string): string {
 /** Extrait les paires `Clé : valeur` d'un corps de mail de formulaire. */
 export function extraireChamps(corps: string): Record<string, string> {
   const champs: Record<string, string> = {};
-  for (const ligne of corps.split(/\r?\n/)) {
+  for (const ligneBrute of corps.split(/\r?\n/)) {
+    const ligne = ligneBrute.replace(/\*\*([^*]+):\*\*/g, '$1:');
     const m = /^\s*\*?\*?([A-Za-zÀ-ÿ' _-]{2,40})\*?\*?\s*[:：]\s*(.+?)\s*$/.exec(ligne);
     if (!m) continue;
     const cle = normaliserTexte(m[1]!).replace(/\s+/g, '_');
@@ -126,7 +133,10 @@ function premierChamp(champs: Record<string, string>, cles: string[]): string | 
 
 function contient(texte: string, mots: string[]): string | null {
   for (const mot of mots) {
-    if (texte.includes(mot)) return mot;
+    const motif = mot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const debut = /^[\p{L}\p{N}]/u.test(mot) ? '(?<![\\p{L}\\p{N}])' : '';
+    const fin = /[\p{L}\p{N}]$/u.test(mot) ? '(?![\\p{L}\\p{N}])' : '';
+    if (new RegExp(`${debut}${motif}${fin}`, 'u').test(texte)) return mot;
   }
   return null;
 }
@@ -145,6 +155,16 @@ function lireUtm(url: string | null | undefined): Record<string, string> {
   }
 }
 
+function emailsDans(texte: string | null | undefined): string[] {
+  if (!texte) return [];
+  return [...texte.matchAll(RE_EMAIL_GLOBAL)].map((match) => match[0]!.toLowerCase().trim());
+}
+
+function emailExterne(candidats: Array<string | null | undefined>): string | null {
+  const emails = candidats.flatMap(emailsDans);
+  return emails.find((email) => !email.endsWith('@airfit.co')) ?? null;
+}
+
 export function classifier(entree: EntreeClassification): ResultatClassification {
   const corps = entree.corps ?? '';
   const brut = [entree.sujet ?? '', entree.expediteur ?? '', corps, entree.url ?? '']
@@ -157,12 +177,14 @@ export function classifier(entree: EntreeClassification): ResultatClassification
   let signaux = 0;
 
   // --- Identité --------------------------------------------------------------
-  const email =
-    (premierChamp(champs, ['email', 'e_mail', 'mail', 'adresse_email', 'courriel']) ??
-      RE_EMAIL.exec(entree.expediteur ?? '')?.[0] ??
-      RE_EMAIL.exec(brut)?.[0] ??
-      null)?.toLowerCase().trim() ?? null;
-  const emailValide = email && RE_EMAIL.test(email) ? email : null;
+  const emailChamp = premierChamp(champs, ['email', 'e_mail', 'mail', 'adresse_email', 'courriel']);
+  // Le corps du formulaire prime sur l'expéditeur : un transfert envoyé par
+  // @airfit.co contient souvent la véritable adresse du prospect plus bas.
+  const emailValide = emailExterne([emailChamp, corps, entree.sujet, entree.expediteur]);
+  const contientSeulementEmailInterne = !emailValide && emailsDans(brut).some((email) => email.endsWith('@airfit.co'));
+  if (contientSeulementEmailInterne) {
+    indices.push('adresse interne @airfit.co ignorée');
+  }
 
   const telephone =
     premierChamp(champs, ['telephone', 'tel', 'portable', 'mobile', 'numero']) ??
@@ -188,6 +210,7 @@ export function classifier(entree: EntreeClassification): ResultatClassification
   let segment: Segment = 'b2b';
   const domaine = emailValide?.split('@')[1] ?? null;
   const motCollectivite = contient(texte, MOTS_COLLECTIVITE);
+  const motAssociation = contient(texte, MOTS_ASSOCIATION);
   const domaineCollectivite =
     domaine != null &&
     (domaine.endsWith('.gouv.fr') ||
@@ -195,22 +218,26 @@ export function classifier(entree: EntreeClassification): ResultatClassification
       domaine.includes('mairie') ||
       domaine.includes('agglo'));
 
-  if (motCollectivite || domaineCollectivite) {
+  if (motAssociation) {
+    segment = 'association';
+    signaux += 2;
+    indices.push(`mention « ${motAssociation} » → association`);
+  } else if (motCollectivite || domaineCollectivite) {
     segment = 'collectivite';
     signaux += 2;
     indices.push(
       domaineCollectivite ? `domaine public « ${domaine} »` : `mention « ${motCollectivite} »`,
     );
   } else if (domaine && DOMAINES_GRAND_PUBLIC.has(domaine)) {
-    // Un domaine grand public sans société renseignée : particulier probable.
+    // Gmail/Orange/etc. sont aussi utilisés par des élus, associations et TPE :
+    // sans autre signal, ne jamais transformer silencieusement le lead en B2C.
     if (societe) {
       segment = 'b2b';
       signaux += 1;
       indices.push(`domaine grand public mais société renseignée (« ${societe} »)`);
     } else {
-      segment = 'b2c';
-      signaux += 2;
-      indices.push(`adresse grand public « ${domaine} » sans société`);
+      segment = 'b2b';
+      indices.push(`domaine grand public « ${domaine} » — segment à confirmer`);
     }
   } else if (domaine) {
     segment = 'b2b';
@@ -241,7 +268,7 @@ export function classifier(entree: EntreeClassification): ResultatClassification
   // --- Type de demande -------------------------------------------------------
   let typeDemande: TypeDemande = 'formulaire_contact';
   let leadMagnet: string | null =
-    premierChamp(champs, ['ressource', 'document', 'lead_magnet', 'fichier', 'telechargement']) ??
+    premierChamp(champs, ['ressource', 'document', 'lead_magnet', 'fichier', 'telechargement', 'origine', 'source']) ??
     null;
   let typeTrouve = false;
   for (const regle of REGLES_TYPE) {
@@ -285,10 +312,27 @@ export function classifier(entree: EntreeClassification): ResultatClassification
     }
   }
 
+  const marqueurInbound = contient(texte, [
+    'nouveau lead airfit',
+    'nouveau contact airfit',
+    'nouveau lead entrant',
+    'nouveau message du formulaire',
+    'new form submission',
+  ]);
+  if (marqueurInbound) {
+    signaux += 2;
+    indices.push(`notification structurée « ${marqueurInbound} »`);
+  }
+
   if (emailValide) signaux += 1;
   else indices.push('aucun e-mail détecté');
+  if (telephone) signaux += 1;
+  if (nom) signaux += 1;
 
-  const confiance = Math.min(1, Math.round((signaux / 8) * 100) / 100);
+  const confianceCalculee = Math.min(1, Math.round((signaux / 8) * 100) / 100);
+  // Même si les autres champs sont complets, un formulaire rempli avec une
+  // adresse AirFit reste non légitime et doit passer par une confirmation.
+  const confiance = contientSeulementEmailInterne ? Math.min(0.59, confianceCalculee) : confianceCalculee;
 
   return {
     segment,

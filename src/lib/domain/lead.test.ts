@@ -91,17 +91,28 @@ describe('calculerDedupeKey', () => {
     expect(a).toBe(b);
   });
 
-  it('distingue deux ressources différentes', () => {
+  it('regroupe un même e-mail même si les origines diffèrent', () => {
     const a = calculerDedupeKey({ email: 'a@b.fr', typeDemande: 'catalogue', leadMagnet: 'Catalogue 2026', dateReception: '2026-10-05' });
     const b = calculerDedupeKey({ email: 'a@b.fr', typeDemande: 'catalogue', leadMagnet: 'Catalogue 2025', dateReception: '2026-10-05' });
-    expect(a).not.toBe(b);
+    expect(a).toBe(b);
   });
 
-  it('retombe sur le téléphone puis la société', () => {
+  it('retombe sur le téléphone puis le couple nom et ville', () => {
     expect(calculerDedupeKey({ telephone: '06 12 34 56 78', typeDemande: 'appel_entrant', dateReception: '2026-10-05' })).toBe(
-      '0612345678|appel_entrant|2026-10-05',
+      '0612345678',
     );
-    expect(calculerDedupeKey({ societe: 'Mairie de Lyon', typeDemande: 'catalogue', dateReception: '2026-10-05' })).toContain('mairiedelyon');
+    expect(calculerDedupeKey({ nom: 'Marie Dupont', ville: 'Lyon', societe: 'Mairie de Lyon', typeDemande: 'catalogue', dateReception: '2026-10-05' })).toBe('nom:mariedupont|ville:lyon');
+  });
+
+  it('ignore les adresses techniques AirFit et Webflow', () => {
+    expect(calculerDedupeKey({
+      nom: 'Marie Dupont',
+      ville: 'Lyon',
+      email: 'mehdi@airfit.co',
+      telephone: '+33 7 80 90 37 87',
+      typeDemande: 'catalogue',
+      dateReception: '2026-10-05',
+    })).toBe('nom:mariedupont|ville:lyon');
   });
 
   it('renvoie null sans identité exploitable', () => {

@@ -13,15 +13,20 @@ import { fermerDb, getDb } from './index';
 import {
   creerLead,
   confirmerPointsLead,
+  confirmerPointsLeads,
   leadsAPousser,
   lireLead,
   listerLeads,
   listerTousLeads,
+  listerValidationsAutomatiques,
   marquerSynchronise,
   mettreAJourLead,
+  retraiterAutomatisationHistorique,
   rescorerTout,
   supprimerLead,
+  supprimerLeads,
 } from './leads';
+import { AUTEUR_VALIDATION_AUTOMATIQUE } from '@/lib/domain/automation';
 import { ecrireObjectif, ecrireReglages, lireObjectif, lireReglages } from './settings';
 import { pointsDuLead, pointsProposesDuLead, schemaLeadInput, type LeadParsed } from '@/lib/domain/lead';
 import { OBJECTIF_DEFAUT } from '@/lib/domain/objectives';
@@ -80,6 +85,56 @@ function definirTests(): void {
     expect(modifie?.pointsConfirmes).toBe(false);
     expect(modifie?.pointsConfirmesLe).toBeNull();
     expect(pointsDuLead(modifie!)).toBe(0);
+  });
+
+  it('confirme automatiquement à 90 % et journalise la décision', async () => {
+    const { lead } = await creerLead(
+      entreeLead({ sourceCollecte: 'site_web', confiance: 0.9, aVerifier: false }),
+      { validationRequise: true },
+    );
+    expect(lead.pointsConfirmes).toBe(true);
+    expect(lead.pointsConfirmesPar).toBe(AUTEUR_VALIDATION_AUTOMATIQUE);
+    expect(lead.pointsConfirmesLe).not.toBeNull();
+    expect(pointsDuLead(lead)).toBe(1);
+
+    const rapport = await listerValidationsAutomatiques();
+    expect(rapport.total).toBe(1);
+    expect(rapport.leads[0]?.id).toBe(lead.id);
+  });
+
+  it('ne confirme pas automatiquement un e-mail interne AirFit', async () => {
+    const { lead } = await creerLead(
+      entreeLead({ email: 'adel@airfit.co', sourceCollecte: 'site_web', confiance: 1, aVerifier: false }),
+      { validationRequise: true },
+    );
+    expect(lead.pointsConfirmes).toBe(false);
+  });
+
+  it('retraite idempotemment un ancien lead devenu fiable', async () => {
+    const { lead } = await creerLead(
+      entreeLead({ sourceCollecte: 'slack_inbound', confiance: 0.5, aVerifier: false }),
+      { validationRequise: true },
+    );
+    await mettreAJourLead(lead.id, { confiance: 0.95 });
+    expect((await retraiterAutomatisationHistorique()).valides).toBe(1);
+    expect((await retraiterAutomatisationHistorique()).valides).toBe(0);
+    expect((await lireLead(lead.id))?.pointsConfirmesPar).toBe(AUTEUR_VALIDATION_AUTOMATIQUE);
+  });
+
+  it('confirme et supprime une sélection de leads en lot', async () => {
+    const premier = await creerLead(entreeLead({ email: 'premier@exemple.fr' }), { validationRequise: true });
+    const second = await creerLead(entreeLead({ email: 'second@exemple.fr' }), { validationRequise: true });
+    const troisieme = await creerLead(entreeLead({ email: 'troisieme@exemple.fr' }), { validationRequise: true });
+
+    expect(await confirmerPointsLeads([premier.lead.id, second.lead.id], 'adel@airfit.co')).toBe(2);
+    expect((await lireLead(premier.lead.id))?.pointsConfirmes).toBe(true);
+    expect((await lireLead(second.lead.id))?.pointsConfirmesPar).toBe('adel@airfit.co');
+    expect((await lireLead(troisieme.lead.id))?.pointsConfirmes).toBe(false);
+
+    expect(await supprimerLeads([premier.lead.id, troisieme.lead.id])).toBe(2);
+    expect(await lireLead(premier.lead.id)).toBeNull();
+    expect(await lireLead(second.lead.id)).not.toBeNull();
+    expect(await lireLead(troisieme.lead.id)).toBeNull();
   });
 
   it('re-score automatiquement à 0 point quand la relation passe à « client »', async () => {
@@ -156,6 +211,159 @@ function definirTests(): void {
     expect(recherche[0]?.nom).toBe('Alice Martin');
   });
 
+  it('filtre les leads sur une plage de dates personnalisée inclusive', async () => {
+    await creerLead(entreeLead({ nom: 'Avant', email: 'avant@exemple.fr', dateReception: '2026-09-01' }));
+    await creerLead(entreeLead({ nom: 'Début', email: 'debut@exemple.fr', dateReception: '2026-09-10' }));
+    await creerLead(entreeLead({ nom: 'Fin', email: 'fin@exemple.fr', dateReception: '2026-09-20' }));
+    await creerLead(entreeLead({ nom: 'Après', email: 'apres@exemple.fr', dateReception: '2026-09-21' }));
+
+    const { leads } = await listerLeads({ dateDebut: '2026-09-10', dateFin: '2026-09-20' });
+    expect(leads.map((lead) => lead.nom).sort()).toEqual(['Début', 'Fin']);
+  });
+
+  it('fusionne le même e-mail venu de deux origines sans écraser les données existantes', async () => {
+    const premier = await creerLead(entreeLead({
+      email: 'multi@exemple.fr',
+      typeDemande: 'formulaire_contact',
+      societe: 'Société initiale',
+      telephone: null,
+      message: 'Premier formulaire',
+    }));
+    const second = await creerLead(entreeLead({
+      email: 'multi@exemple.fr',
+      typeDemande: 'simulateur',
+      leadMagnet: 'Simulateur collectivités',
+      societe: 'Valeur contradictoire',
+      telephone: '06 12 34 56 78',
+      message: 'Seconde occurrence',
+    }));
+
+    expect(second.doublon).toBe(true);
+    expect(second.lead.id).toBe(premier.lead.id);
+    expect(second.lead).toMatchObject({
+      typeDemande: 'simulateur',
+      leadMagnet: 'Simulateur collectivités',
+      telephone: '06 12 34 56 78',
+      societe: 'Société initiale',
+    });
+    expect(second.lead.message).toContain('Premier formulaire');
+    expect(second.lead.message).toContain('Seconde occurrence');
+    expect((await listerLeads({})).total).toBe(1);
+  });
+
+  it('fusionne le même e-mail reçu le lendemain avec la fenêtre de 1 jour', async () => {
+    await creerLead(entreeLead({ email: 'jour@exemple.fr', dateReception: '2026-10-15' }));
+    const lendemain = await creerLead(entreeLead({ email: 'jour@exemple.fr', dateReception: '2026-10-16' }));
+    expect(lendemain.doublon).toBe(true);
+    expect((await listerLeads({})).total).toBe(1);
+  });
+
+  it('fusionne Slack et une saisie enrichie grâce au même nom et à la même ville', async () => {
+    const slack = await creerLead(entreeLead({
+      nom: 'Karen Douglas',
+      ville: 'Lamentin',
+      email: null,
+      telephone: null,
+      sourceCollecte: 'slack_inbound',
+      typeDemande: 'simulateur',
+    }));
+    const manuel = await creerLead(entreeLead({
+      nom: 'Karen Douglas',
+      ville: 'Lamentin',
+      email: 'douglaskaren09@gmail.com',
+      telephone: '+590690194156',
+      sourceCollecte: 'manuel',
+    }));
+
+    expect(manuel.doublon).toBe(true);
+    expect(manuel.lead.id).toBe(slack.lead.id);
+    expect(manuel.lead.email).toBe('douglaskaren09@gmail.com');
+    expect((await listerLeads({})).total).toBe(1);
+  });
+
+  it('répare le nom et la ville des anciennes notifications Slack compactes', async () => {
+    const { lead } = await creerLead(
+      entreeLead({
+        nom: null,
+        ville: null,
+        sourceCollecte: 'slack_inbound',
+        message: 'Nouveau lead AirFit : de Cuniac Titouan (Nancy 54000)',
+      }),
+    );
+
+    const { leads } = await listerLeads({});
+    expect(leads[0]).toMatchObject({ nom: 'de Cuniac Titouan', ville: 'Nancy' });
+    expect(await lireLead(lead.id)).toMatchObject({ nom: 'de Cuniac Titouan', ville: 'Nancy' });
+  });
+
+  it('reclasse les anciens leads Slack en collectivités sans annuler leur confirmation', async () => {
+    const { lead } = await creerLead(
+      entreeLead({
+        sourceCollecte: 'slack_inbound',
+        segment: 'b2b',
+        message: 'Nouveau lead AirFit : Camille Martin (Lyon)',
+      }),
+      { validationRequise: true },
+    );
+    await confirmerPointsLead(lead.id, 'adel@airfit.co');
+
+    const resultat = await listerLeads({ segment: ['collectivite'] });
+    expect(resultat.total).toBe(1);
+    expect(resultat.leads[0]).toMatchObject({
+      id: lead.id,
+      segment: 'collectivite',
+      pointsConfirmes: true,
+      pointsConfirmesPar: 'adel@airfit.co',
+    });
+  });
+
+  it('répare le format compact Nouveau contact et son classement inbound non confirmé', async () => {
+    const { lead } = await creerLead(
+      entreeLead({
+        nom: null,
+        ville: null,
+        sourceCollecte: 'slack_inbound',
+        relation: 'client',
+        initiative: 'inbound_site',
+        confiance: 0.5,
+        aVerifier: true,
+        message: 'Nouveau contact AirFit : CHRISTOPHE MALINS (SAINT-SAVIN)',
+      }),
+      { validationRequise: true },
+    );
+
+    const { leads } = await listerLeads({});
+    expect(leads[0]).toMatchObject({
+      nom: 'CHRISTOPHE MALINS',
+      ville: 'SAINT-SAVIN',
+      relation: 'prospect',
+      initiative: 'inbound_site',
+      points: 1,
+    });
+    expect(await lireLead(lead.id)).toMatchObject({ relation: 'prospect', points: 1 });
+  });
+
+  it('récupère l’origine des anciens leads dans les blocs Slack', async () => {
+    const { lead } = await creerLead(
+      entreeLead({
+        sourceCollecte: 'slack_inbound',
+        typeDemande: 'formulaire_contact',
+        message: 'Nouveau lead AirFit : Camille Martin (Lyon 69000)',
+        rawPayload: {
+          source: 'slack',
+          evenement: {
+            text: 'Nouveau lead AirFit : Camille Martin (Lyon 69000)',
+            blocks: [{ type: 'section', fields: [{ type: 'mrkdwn', text: '*Origine*\nSimulateur' }] }],
+          },
+        },
+      }),
+    );
+
+    const { leads } = await listerLeads({});
+    expect(leads[0]).toMatchObject({ typeDemande: 'simulateur', leadMagnet: 'simulateur' });
+    expect(await lireLead(lead.id)).toMatchObject({ typeDemande: 'simulateur', leadMagnet: 'simulateur' });
+  });
+
   it('pagine correctement (limite/offset) et renvoie le total exact', async () => {
     for (let i = 0; i < 5; i++) {
       await creerLead(
@@ -195,7 +403,7 @@ function definirTests(): void {
   });
 
   it('lireReglages / ecrireReglages : aller-retour sur une valeur', async () => {
-    expect((await lireReglages()).fenetreDedupeJours).toBe(30);
+    expect((await lireReglages()).fenetreDedupeJours).toBe(1);
     await ecrireReglages({ fenetreDedupeJours: 45 });
     expect((await lireReglages()).fenetreDedupeJours).toBe(45);
   });

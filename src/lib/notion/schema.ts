@@ -63,6 +63,22 @@ export const P = {
   idDashboard: 'ID Dashboard',
 } as const;
 
+/** Colonnes de la vue historique « Suivi des leads » utilisée par AirFit. */
+export const P_SUIVI = {
+  date: 'Date',
+  annee: 'Année',
+  quarter: 'Quarter',
+  initiative: "Initiative d'acquisition",
+  secteur: "Secteur d'activité",
+  canal: "Canal d'acquisition",
+  sourceProspect: 'Source Prospect',
+  issuGrowth: 'Issu du pôle Growth ?',
+  salesResponsable: 'Sales Responsable',
+  departement: 'Département',
+  pipeline: '📊 01-23 05 04 Pipeline Notion',
+  reportingCampagnes: '🚜 01-23 05 03 Reporting Stats campagnes',
+} as const;
+
 const couleurs = ['blue', 'green', 'orange', 'purple', 'pink', 'yellow', 'red', 'brown', 'gray'] as const;
 
 function options(valeurs: readonly string[], labels: Record<string, string>) {
@@ -99,6 +115,33 @@ export const PROPRIETES: Record<string, Record<string, unknown>> = {
   [P.aVerifier]: { checkbox: {} },
   [P.periode]: { rich_text: {} },
   [P.idDashboard]: { rich_text: {} },
+  [P_SUIVI.date]: { date: {} },
+  [P_SUIVI.annee]: { select: { options: ['2025', '2026', '2027'].map((name) => ({ name })) } },
+  [P_SUIVI.quarter]: { select: { options: ['Q1', 'Q2', 'Q3', 'Q4'].map((name) => ({ name })) } },
+  [P_SUIVI.initiative]: { select: { options: [{ name: 'OutBound' }, { name: 'InBound' }] } },
+  [P_SUIVI.secteur]: {
+    select: {
+      options: [
+        'Aménagement', 'Centre sportif', 'Entreprise', 'Education', 'Hospitalité',
+        'Collectivité Publique', 'Centre sportif et de loisirs', 'Sport', 'Immobilier',
+        'Police / Armée / Pompiers', 'Logistique / transports', 'Particulier', 'Santé',
+      ].map((name) => ({ name })),
+    },
+  },
+  [P_SUIVI.canal]: {
+    select: {
+      options: [
+        'Prospection BDR', 'Renouvellement client existant / Recommandation client / Bouche à oreille',
+        'Evenements', 'Site internet', 'Newsletter', 'Réseaux sociaux', 'Appel / Mail entrant',
+        'Distributeur', 'Approche individuelle Sales', 'Approche individuelle Marketing', 'SEA',
+        'Get Scalability', 'Campagne Emailing (Outbound)', 'Campagne Emailing',
+        "Rapporteur d'affaires", 'Campagne LinkedIn',
+      ].map((name) => ({ name })),
+    },
+  },
+  [P_SUIVI.sourceProspect]: { rich_text: {} },
+  [P_SUIVI.issuGrowth]: { checkbox: {} },
+  [P_SUIVI.salesResponsable]: { people: {} },
 };
 
 // --- Écriture : lead local → propriétés Notion --------------------------------
@@ -116,7 +159,33 @@ function selectLabel<T extends string>(valeur: T | null, labels: Record<string, 
   return valeur ? { select: { name: labels[valeur] ?? valeur } } : { select: null };
 }
 
+const selection = (valeur: string | null | undefined) =>
+  valeur ? { select: { name: valeur } } : { select: null };
+
+function canalAcquisition(lead: Lead): string {
+  if (lead.relation === 'distributeur') return 'Distributeur';
+  if (lead.typeDemande === 'appel_entrant' || lead.sourceCollecte === 'telephone') return 'Appel / Mail entrant';
+  switch (lead.initiative) {
+    case 'newsletter': return 'Newsletter';
+    case 'outbound_bdr': return 'Prospection BDR';
+    case 'outbound_campagne': return 'Campagne Emailing (Outbound)';
+    case 'salon_evenement': return 'Evenements';
+    case 'reseaux_sociaux': return 'Réseaux sociaux';
+    case 'bouche_a_oreille': return 'Renouvellement client existant / Recommandation client / Bouche à oreille';
+    default: return 'Site internet';
+  }
+}
+
+function secteurActivite(lead: Lead): string {
+  if (lead.segment === 'collectivite') return 'Collectivité Publique';
+  if (lead.segment === 'b2c') return 'Particulier';
+  if (lead.segment === 'association') return 'Sport';
+  return 'Entreprise';
+}
+
 export function versProprietesNotion(lead: Lead): Record<string, unknown> {
+  const periode = periodeDepuisDate(lead.dateReception);
+  const [annee, quarter] = periode.split('-');
   return {
     [P.nom]: titre(lead.nom ?? lead.societe ?? lead.email),
     [P.dateReception]: date(lead.dateReception),
@@ -133,10 +202,8 @@ export function versProprietesNotion(lead: Lead): Record<string, unknown> {
     [P.campagne]: texte(lead.campagne),
     [P.leadMagnet]: texte(lead.leadMagnet),
     [P.message]: texte(lead.message),
-    [P.statut]: selectLabel(lead.statut, LABELS_STATUT),
-    [P.typeActivation]: selectLabel(lead.typeActivation, LABELS_TYPE_ACTIVATION),
-    [P.dateActivation]: date(lead.dateActivation),
-    [P.proprietaire]: texte(lead.proprietaire),
+    // Les champs d'opportunité sont volontairement pilotés dans Notion puis
+    // redescendent vers le dashboard ; le push ne doit pas les écraser.
     [P.tags]: { multi_select: lead.tags.map((t) => ({ name: t.slice(0, 90) })) },
     [P.points]: { number: pointsDuLead(lead) },
     [P.pointsOverride]: { number: lead.pointsOverride },
@@ -144,8 +211,20 @@ export function versProprietesNotion(lead: Lead): Record<string, unknown> {
     [P.eligibleActivation]: { checkbox: lead.pointsConfirmes && lead.eligibleActivation },
     [P.regle]: texte(lead.regleLabel),
     [P.aVerifier]: { checkbox: lead.aVerifier },
-    [P.periode]: texte(periodeDepuisDate(lead.dateReception)),
+    [P.periode]: texte(periode),
     [P.idDashboard]: texte(lead.id),
+    [P_SUIVI.date]: date(lead.dateReception),
+    [P_SUIVI.annee]: selection(annee ?? null),
+    [P_SUIVI.quarter]: selection(quarter ?? null),
+    [P_SUIVI.initiative]: selection(
+      ['outbound_campagne', 'outbound_bdr'].includes(lead.initiative) ? 'OutBound' : 'InBound',
+    ),
+    [P_SUIVI.secteur]: selection(secteurActivite(lead)),
+    [P_SUIVI.canal]: selection(canalAcquisition(lead)),
+    [P_SUIVI.sourceProspect]: texte(
+      lead.leadMagnet ?? lead.campagne ?? LABELS_TYPE_DEMANDE[lead.typeDemande] ?? lead.message,
+    ),
+    [P_SUIVI.issuGrowth]: { checkbox: true },
   };
 }
 
@@ -184,6 +263,47 @@ function lireMulti(v: ValeurNotion): string[] {
   return Array.isArray(m) ? m.map((o) => o.name ?? '').filter(Boolean) : [];
 }
 
+function lirePersonnes(v: ValeurNotion): string | null {
+  const personnes = v?.['people'] as Array<{ name?: string; id?: string }> | undefined;
+  if (!Array.isArray(personnes) || personnes.length === 0) return null;
+  return personnes.map((personne) => personne.name ?? personne.id ?? '').filter(Boolean).join(', ') || null;
+}
+
+function relationRenseignee(v: ValeurNotion): boolean {
+  const relation = v?.['relation'];
+  return Array.isArray(relation) && relation.length > 0;
+}
+
+function lireTitreDisponible(props: Record<string, ValeurNotion>): string | null {
+  for (const valeur of Object.values(props)) {
+    if (valeur?.['type'] === 'title' || Array.isArray(valeur?.['title'])) return lireTexte(valeur);
+  }
+  return null;
+}
+
+function segmentDepuisSecteur(valeur: string | null): Segment | null {
+  if (!valeur) return null;
+  if (valeur === 'Collectivité Publique') return 'collectivite';
+  if (valeur === 'Particulier') return 'b2c';
+  if (valeur === 'Sport' || valeur === 'Centre sportif' || valeur === 'Centre sportif et de loisirs') return 'association';
+  return 'b2b';
+}
+
+function initiativeDepuisSuivi(valeur: string | null): Initiative | null {
+  if (valeur === 'InBound') return 'inbound_site';
+  if (valeur === 'OutBound') return 'outbound_campagne';
+  return null;
+}
+
+function typeDepuisCanal(valeur: string | null): TypeDemande | null {
+  if (valeur === 'Appel / Mail entrant') return 'appel_entrant';
+  if (valeur === 'Newsletter') return 'lead_magnet_autre';
+  if (valeur === 'Renouvellement client existant / Recommandation client / Bouche à oreille') {
+    return 'renouvellement_client';
+  }
+  return valeur ? 'formulaire_contact' : null;
+}
+
 /** Inverse un dictionnaire de libellés pour retrouver la clé technique. */
 function inverse<T extends string>(labels: Record<T, string>): Map<string, T> {
   const m = new Map<string, T>();
@@ -215,6 +335,7 @@ export interface LeadDepuisNotion {
 /** Convertit une page Notion en patch exploitable côté dashboard. */
 export function depuisPageNotion(page: {
   properties: Record<string, unknown>;
+  last_edited_time?: string;
 }): LeadDepuisNotion {
   const props = page.properties as Record<string, ValeurNotion>;
   const patch: Partial<LeadParsed> = {
@@ -245,6 +366,36 @@ export function depuisPageNotion(page: {
     ? resoudre<TypeActivation>(typeActivationBrut, INV_ACTIVATION, 'activation')
     : null;
   patch.dateActivation = lireDate(props[P.dateActivation]);
+
+  // La vue métier historique peut cohabiter avec les colonnes techniques du
+  // dashboard. Quand ses champs sont présents, ils priment pour la lecture.
+  const secteur = segmentDepuisSecteur(lireSelect(props[P_SUIVI.secteur]));
+  if (secteur) patch.segment = secteur;
+  const initiativeSuivi = initiativeDepuisSuivi(lireSelect(props[P_SUIVI.initiative]));
+  if (initiativeSuivi) patch.initiative = initiativeSuivi;
+  const typeSuivi = typeDepuisCanal(lireSelect(props[P_SUIVI.canal]));
+  if (typeSuivi) patch.typeDemande = typeSuivi;
+  const titreSuivi = lireTitreDisponible(props);
+  if (!patch.nom && titreSuivi) patch.nom = titreSuivi;
+  if (!patch.societe && titreSuivi) patch.societe = titreSuivi;
+  const sourceProspect = lireTexte(props[P_SUIVI.sourceProspect]);
+  if (sourceProspect) patch.leadMagnet = sourceProspect;
+  const responsable = lirePersonnes(props[P_SUIVI.salesResponsable]);
+  if (responsable) patch.proprietaire = responsable;
+
+  const typeActivationSuivi = lireSelect(props[P.typeActivation]);
+  const opportuniteLiee = relationRenseignee(props[P_SUIVI.pipeline]);
+  if (typeActivationSuivi || opportuniteLiee) {
+    const reactivation = typeActivationSuivi === 'Réactivation';
+    patch.typeActivation = reactivation ? 'reactivation' : 'activation';
+    patch.statut = reactivation ? 'reactive' : 'active';
+    patch.dateActivation =
+      lireDate(props[P.dateActivation]) ?? page.last_edited_time?.slice(0, 10) ?? patch.dateReception ?? null;
+    patch.aVerifier = false;
+    if (typeActivationSuivi === "Création d'orga") {
+      patch.tags = [...new Set([...(patch.tags ?? []), "Création d'orga"])];
+    }
+  }
 
   // Un « Points forcés » hors barème est ignoré plutôt que de faire échouer le pull.
   if (patch.pointsOverride != null && ![0, 0.5, 1].includes(patch.pointsOverride)) {

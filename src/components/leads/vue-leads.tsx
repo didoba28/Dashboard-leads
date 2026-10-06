@@ -13,6 +13,7 @@ import {
   SEGMENTS,
   STATUTS,
   TYPES_DEMANDE,
+  type SourceCollecte,
 } from '@/lib/domain/taxonomy';
 import { pointsDuLead, pointsProposesDuLead, type Lead } from '@/lib/domain/lead';
 import { Badge, Bouton, Carte, EtatVide, Entree, Interrupteur, Selection, Spinner } from '@/components/ui/primitives';
@@ -21,9 +22,13 @@ import { FormulaireLead } from './formulaire-lead';
 import { ImportCsv } from './import-csv';
 import { formaterDateCourte, formaterPoints } from '@/lib/format';
 import { useToasts } from '@/components/ui/toast';
+import { confirmerSelectionLeads, supprimerSelectionLeads } from '@/app/leads/actions';
+import { RapportAutomatisation } from './rapport-automatisation';
 
 export interface FiltresVue {
   periode: string;
+  dateDebut: string;
+  dateFin: string;
   q: string;
   segment: string;
   statut: string;
@@ -35,10 +40,13 @@ export interface FiltresVue {
 }
 
 const TAILLE_PAGE = 50;
+const DATE_DEBUT_OCTOBRE = '2026-10-01';
 
 function construireQuery(f: FiltresVue, offset: number): string {
   const p = new URLSearchParams();
   if (f.periode !== 'toutes') p.set('periode', f.periode);
+  if (f.dateDebut) p.set('dateDebut', f.dateDebut);
+  if (f.dateFin) p.set('dateFin', f.dateFin);
   p.set('limite', String(TAILLE_PAGE));
   p.set('offset', String(offset));
   p.set('tri', f.tri);
@@ -61,6 +69,42 @@ const TON_STATUT: Record<string, 'neutre' | 'info' | 'bon' | 'attention' | 'crit
   non_qualifie: 'neutre',
   perdu: 'critique',
 };
+
+function LogoSlack() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" role="img" aria-label="Slack">
+      <rect x="9.25" y="1" width="4.25" height="9" rx="2.125" fill="#36C5F0" />
+      <rect x="14" y="5.75" width="9" height="4.25" rx="2.125" fill="#2EB67D" />
+      <rect x="10.5" y="14" width="4.25" height="9" rx="2.125" fill="#ECB22E" />
+      <rect x="1" y="14" width="9" height="4.25" rx="2.125" fill="#E01E5A" />
+      <circle cx="7.25" cy="7.9" r="2.1" fill="#36C5F0" />
+      <circle cx="16.1" cy="12.1" r="2.1" fill="#2EB67D" />
+      <circle cx="7.9" cy="11.9" r="2.1" fill="#E01E5A" />
+      <circle cx="12.65" cy="16.1" r="2.1" fill="#ECB22E" />
+    </svg>
+  );
+}
+
+function LogoGmail() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" role="img" aria-label="Gmail">
+      <path d="M3 7.2v10.3" fill="none" stroke="#4285F4" strokeWidth="3" strokeLinecap="round" />
+      <path d="M21 7.2v10.3" fill="none" stroke="#34A853" strokeWidth="3" strokeLinecap="round" />
+      <path d="M3.2 7.1 12 14l8.8-6.9" fill="none" stroke="#EA4335" strokeWidth="3" strokeLinejoin="round" />
+      <path d="M3 17.5h4" fill="none" stroke="#FBBC04" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CanalCollecte({ source }: { source: SourceCollecte }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      {source === 'slack_inbound' ? <LogoSlack /> : null}
+      {source === 'email_formulaire' ? <LogoGmail /> : null}
+      <span className="truncate">{LABELS_SOURCE_COLLECTE[source]}</span>
+    </span>
+  );
+}
 
 /** Un filtre de la barre : largeur maîtrisée, libellé accessible. */
 function FiltreSelect({
@@ -117,7 +161,10 @@ export function VueLeads({
   const [selection, setSelection] = useState<Lead | null>(null);
   const [creation, setCreation] = useState(false);
   const [importOuvert, setImportOuvert] = useState(false);
+  const [idsSelectionnes, setIdsSelectionnes] = useState<Set<string>>(() => new Set());
+  const [actionGroupee, setActionGroupee] = useState<'confirmation' | 'suppression' | null>(null);
   const premierRendu = useRef(true);
+  const caseToutRef = useRef<HTMLInputElement>(null);
   const { notifier } = useToasts();
 
   // Recherche différée : on ne requête pas à chaque frappe.
@@ -135,6 +182,7 @@ export function VueLeads({
         if (!reponse.ok) throw new Error(data?.erreur ?? 'Chargement impossible');
         setLeads(data.leads as Lead[]);
         setTotal(data.total as number);
+        setIdsSelectionnes(new Set());
       } catch (err) {
         notifier({ ton: 'erreur', titre: 'Chargement impossible', detail: err instanceof Error ? err.message : String(err) });
       } finally {
@@ -157,9 +205,30 @@ export function VueLeads({
     setFiltres((f) => ({ ...f, [cle]: valeur }));
   }
 
+  function majPeriode(valeur: string) {
+    setOffset(0);
+    setFiltres((f) => ({ ...f, periode: valeur, dateDebut: '', dateFin: '' }));
+  }
+
+  function majDate(cle: 'dateDebut' | 'dateFin', valeur: string) {
+    setOffset(0);
+    setFiltres((f) => ({ ...f, periode: 'toutes', [cle]: valeur }));
+  }
+
+  function basculerDepuisOctobre(actif: boolean) {
+    setOffset(0);
+    setFiltres((f) => ({
+      ...f,
+      periode: 'toutes',
+      dateDebut: actif ? DATE_DEBUT_OCTOBRE : '',
+      dateFin: '',
+    }));
+  }
+
   const nbFiltresActifs = useMemo(
     () =>
       [filtres.q, filtres.segment, filtres.statut, filtres.typeDemande, filtres.initiative].filter(Boolean).length +
+      (filtres.dateDebut || filtres.dateFin ? 1 : 0) +
       (filtres.aVerifier ? 1 : 0) + (filtres.aConfirmer ? 1 : 0),
     [filtres],
   );
@@ -167,7 +236,91 @@ export function VueLeads({
   function reinitialiser() {
     setRecherche('');
     setOffset(0);
-    setFiltres((f) => ({ ...f, q: '', segment: '', statut: '', typeDemande: '', initiative: '', aVerifier: false, aConfirmer: false }));
+    setFiltres((f) => ({
+      ...f,
+      q: '',
+      dateDebut: '',
+      dateFin: '',
+      segment: '',
+      statut: '',
+      typeDemande: '',
+      initiative: '',
+      aVerifier: false,
+      aConfirmer: false,
+    }));
+  }
+
+  const leadsSelectionnes = useMemo(
+    () => leads.filter((lead) => idsSelectionnes.has(lead.id)),
+    [idsSelectionnes, leads],
+  );
+  const idsAConfirmer = useMemo(
+    () => leadsSelectionnes.filter((lead) => lead.validationRequise && !lead.pointsConfirmes).map((lead) => lead.id),
+    [leadsSelectionnes],
+  );
+  const tousSelectionnes = leads.length > 0 && idsSelectionnes.size === leads.length;
+  const selectionPartielle = idsSelectionnes.size > 0 && !tousSelectionnes;
+
+  useEffect(() => {
+    if (caseToutRef.current) caseToutRef.current.indeterminate = selectionPartielle;
+  }, [selectionPartielle]);
+
+  function basculerLead(id: string) {
+    setIdsSelectionnes((actuels) => {
+      const suivants = new Set(actuels);
+      if (suivants.has(id)) suivants.delete(id);
+      else suivants.add(id);
+      return suivants;
+    });
+  }
+
+  function basculerTout() {
+    setIdsSelectionnes(tousSelectionnes ? new Set() : new Set(leads.map((lead) => lead.id)));
+  }
+
+  async function confirmerEnLot() {
+    if (idsAConfirmer.length === 0) return;
+    if (!window.confirm(`Confirmer les points de ${idsAConfirmer.length} lead${idsAConfirmer.length > 1 ? 's' : ''} ?`)) return;
+    setActionGroupee('confirmation');
+    try {
+      const { modifies } = await confirmerSelectionLeads(idsAConfirmer);
+      notifier({
+        ton: 'succes',
+        titre: `${modifies} lead${modifies > 1 ? 's' : ''} confirmé${modifies > 1 ? 's' : ''}`,
+      });
+      await recharger(filtres, offset);
+    } catch (err) {
+      notifier({
+        ton: 'erreur',
+        titre: 'Confirmation impossible',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setActionGroupee(null);
+    }
+  }
+
+  async function supprimerEnLot() {
+    const ids = leadsSelectionnes.map((lead) => lead.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Supprimer ${ids.length} lead${ids.length > 1 ? 's' : ''} sélectionné${ids.length > 1 ? 's' : ''} ?`)) return;
+    setActionGroupee('suppression');
+    try {
+      const { modifies } = await supprimerSelectionLeads(ids);
+      notifier({
+        ton: 'succes',
+        titre: `${modifies} lead${modifies > 1 ? 's' : ''} supprimé${modifies > 1 ? 's' : ''}`,
+      });
+      await recharger(filtres, offset);
+    } catch (err) {
+      notifier({
+        ton: 'erreur',
+        titre: 'Suppression impossible',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setActionGroupee(null);
+    }
   }
 
   async function supprimer(lead: Lead) {
@@ -207,6 +360,8 @@ export function VueLeads({
         </div>
       </header>
 
+      <RapportAutomatisation />
+
       {/* Une seule rangée de filtres, qui cadre tout ce qui est en dessous. */}
       <Carte className="px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
@@ -221,12 +376,48 @@ export function VueLeads({
             />
           </div>
           <FiltreSelect
-            largeur="w-28"
+            largeur="w-36"
             label="Période"
             valeur={filtres.periode}
-            onChange={(v) => majFiltre('periode', v)}
-            options={periodes.map((p) => ({ valeur: p.id, label: p.label }))}
+            onChange={majPeriode}
+            options={[...periodes]
+              .sort((a, b) => {
+                if (a.id === 'toutes') return -1;
+                if (b.id === 'toutes') return 1;
+                return b.id.localeCompare(a.id);
+              })
+              .map((p) => ({ valeur: p.id, label: p.label }))}
           />
+          <label className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+            <span>Du</span>
+            <Entree
+              type="date"
+              value={filtres.dateDebut}
+              max={filtres.dateFin || undefined}
+              onChange={(e) => majDate('dateDebut', e.target.value)}
+              className="h-8 w-[8.25rem] px-2 text-xs"
+              aria-label="Date de début"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+            <span>Au</span>
+            <Entree
+              type="date"
+              value={filtres.dateFin}
+              min={filtres.dateDebut || undefined}
+              onChange={(e) => majDate('dateFin', e.target.value)}
+              className="h-8 w-[8.25rem] px-2 text-xs"
+              aria-label="Date de fin"
+            />
+          </label>
+          <div className="flex items-center gap-1.5">
+            <Interrupteur
+              actif={filtres.dateDebut === DATE_DEBUT_OCTOBRE && !filtres.dateFin}
+              onChange={basculerDepuisOctobre}
+              label="Afficher uniquement les leads reçus depuis le 1er octobre 2026"
+            />
+            <span className="whitespace-nowrap text-xs text-ink-2">Depuis le 1er oct. 2026</span>
+          </div>
           <FiltreSelect
             largeur="w-36"
             label="Segment"
@@ -298,6 +489,39 @@ export function VueLeads({
       </Carte>
 
       <Carte className="overflow-hidden">
+        {idsSelectionnes.size > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-hair bg-surface-2 px-4 py-2.5">
+            <p className="mr-auto text-xs font-medium text-ink">
+              {idsSelectionnes.size} lead{idsSelectionnes.size > 1 ? 's' : ''} sélectionné{idsSelectionnes.size > 1 ? 's' : ''}
+            </p>
+            <Bouton
+              taille="petit"
+              variante="secondaire"
+              disabled={idsAConfirmer.length === 0 || actionGroupee !== null}
+              enCours={actionGroupee === 'confirmation'}
+              onClick={() => void confirmerEnLot()}
+            >
+              Confirmer les points{idsAConfirmer.length > 0 ? ` (${idsAConfirmer.length})` : ''}
+            </Bouton>
+            <Bouton
+              taille="petit"
+              variante="danger"
+              disabled={actionGroupee !== null}
+              enCours={actionGroupee === 'suppression'}
+              onClick={() => void supprimerEnLot()}
+            >
+              Supprimer
+            </Bouton>
+            <Bouton
+              taille="petit"
+              variante="discret"
+              disabled={actionGroupee !== null}
+              onClick={() => setIdsSelectionnes(new Set())}
+            >
+              Désélectionner
+            </Bouton>
+          </div>
+        ) : null}
         <div className={clsx('overflow-x-auto transition-opacity', chargement && 'opacity-60')}>
           {leads.length === 0 ? (
             <EtatVide
@@ -314,10 +538,20 @@ export function VueLeads({
               }
             />
           ) : (
-            <table className="w-full min-w-[920px] table-fixed text-left text-[13px]">
+            <table className="w-full min-w-[970px] table-fixed text-left text-[13px]">
               <thead>
                 <tr className="border-b border-hair text-[11px] uppercase tracking-wide text-ink-muted">
-                  <th className="w-20 py-2 pl-4 pr-3 font-medium">Date</th>
+                  <th className="w-11 py-2 pl-4 pr-2 font-medium">
+                    <input
+                      ref={caseToutRef}
+                      type="checkbox"
+                      checked={tousSelectionnes}
+                      onChange={basculerTout}
+                      aria-label={tousSelectionnes ? 'Désélectionner les leads affichés' : 'Sélectionner les leads affichés'}
+                      className="h-3.5 w-3.5 cursor-pointer accent-[var(--s1)]"
+                    />
+                  </th>
+                  <th className="w-20 py-2 pr-3 font-medium">Date</th>
                   <th className="py-2 pr-3 font-medium">Lead</th>
                   <th className="w-28 py-2 pr-3 font-medium">Segment</th>
                   <th className="w-56 py-2 pr-3 font-medium">Demande</th>
@@ -335,16 +569,30 @@ export function VueLeads({
                     <tr
                       key={lead.id}
                       tabIndex={0}
+                      aria-selected={idsSelectionnes.has(lead.id)}
                       onClick={() => setSelection(lead)}
                       onKeyDown={(e) => {
+                        if (e.currentTarget !== e.target) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
                           setSelection(lead);
                         }
                       }}
-                      className="cursor-pointer border-b border-hair/60 transition-colors last:border-0 hover:bg-surface-2 focus-visible:bg-surface-2"
+                      className={clsx(
+                        'cursor-pointer border-b border-hair/60 transition-colors last:border-0 hover:bg-surface-2 focus-visible:bg-surface-2',
+                        idsSelectionnes.has(lead.id) && 'bg-[color-mix(in_srgb,var(--s1)_7%,transparent)]',
+                      )}
                     >
-                      <td className="py-2.5 pl-4 pr-3 text-xs text-ink-muted tabulaire">
+                      <td className="py-2.5 pl-4 pr-2" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={idsSelectionnes.has(lead.id)}
+                          onChange={() => basculerLead(lead.id)}
+                          aria-label={`Sélectionner ${lead.nom ?? lead.societe ?? lead.email ?? 'ce lead'}`}
+                          className="h-3.5 w-3.5 cursor-pointer accent-[var(--s1)]"
+                        />
+                      </td>
+                      <td className="py-2.5 pr-3 text-xs text-ink-muted tabulaire">
                         {formaterDateCourte(lead.dateReception)}
                       </td>
                       <td className="max-w-64 py-2.5 pr-3">
@@ -369,13 +617,15 @@ export function VueLeads({
                       <td className="max-w-52 py-2.5 pr-3 text-xs text-ink-2">
                         <span className="block truncate">{LABELS_TYPE_DEMANDE[lead.typeDemande]}</span>
                         {lead.leadMagnet ? (
-                          <span className="block truncate text-[11px] text-ink-muted">{lead.leadMagnet}</span>
+                          <span className="block truncate text-[11px] text-ink-muted">
+                            Origine : {lead.leadMagnet}
+                          </span>
                         ) : null}
                       </td>
                       <td className="max-w-48 py-2.5 pr-3 text-xs text-ink-2">
                         <span className="block truncate">{LABELS_INITIATIVE[lead.initiative]}</span>
                         <span className="block truncate text-[11px] text-ink-muted">
-                          {LABELS_SOURCE_COLLECTE[lead.sourceCollecte]}
+                          <CanalCollecte source={lead.sourceCollecte} />
                         </span>
                       </td>
                       <td className="py-2.5 pr-3">
@@ -443,7 +693,7 @@ export function VueLeads({
           selection ? (
             <span className="flex items-center gap-2">
               Reçu le {formaterDateCourte(selection.dateReception)} ·{' '}
-              {LABELS_SOURCE_COLLECTE[selection.sourceCollecte]}
+              <CanalCollecte source={selection.sourceCollecte} />
               <button
                 type="button"
                 onClick={() => void supprimer(selection)}

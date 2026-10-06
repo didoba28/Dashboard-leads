@@ -11,6 +11,21 @@ describe('schemaEmailEntrant', () => {
     const resultat = schemaEmailEntrant.safeParse({ sujet: 'Demande de devis' });
     expect(resultat.success).toBe(true);
   });
+
+  it('normalise les alias Gmail / Make en champs internes', () => {
+    const resultat = schemaEmailEntrant.parse({
+      subject: 'test alias',
+      text: 'Nom : Test Alias',
+      receivedAt: '1790839930000',
+      fromName: 'Webflow Forms',
+      fromEmail: 'notifications@example.com',
+    });
+
+    expect(resultat.sujet).toBe('test alias');
+    expect(resultat.corpsTexte).toBe('Nom : Test Alias');
+    expect(resultat.recuLe).toBe('1790839930000');
+    expect(resultat.expediteur).toBe('Webflow Forms <notifications@example.com>');
+  });
 });
 
 describe('htmlVersTexte', () => {
@@ -55,7 +70,7 @@ describe('leadDepuisEmail', () => {
     expect(lead.dateReception).toBe('2026-09-10');
   });
 
-  it('classe en b2c un mail gmail.com sans société', () => {
+  it('ne déduit pas B2C du seul domaine gmail.com', () => {
     const entree = schemaEmailEntrant.parse({
       sujet: 'Demande de renseignements',
       expediteur: 'jean.martin@gmail.com',
@@ -63,13 +78,44 @@ describe('leadDepuisEmail', () => {
     });
 
     const lead = leadDepuisEmail(entree);
-    expect(lead.segment).toBe('b2c');
+    expect(lead.segment).toBe('b2b');
   });
 
   it('utilise la date du jour si recuLe est absent', () => {
     const entree = schemaEmailEntrant.parse({ sujet: 'Demande de devis' });
     const lead = leadDepuisEmail(entree);
     expect(lead.dateReception).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('convertit le timestamp Gmail en date de réception', () => {
+    const entree = schemaEmailEntrant.parse({
+      subject: 'test alias',
+      text: 'Nom : Test Alias',
+      receivedAt: '1790839930000',
+    });
+
+    expect(leadDepuisEmail(entree).dateReception).toBe('2026-10-01');
+  });
+
+  it('préfère le contact du formulaire aux adresses des signatures', () => {
+    const entree = schemaEmailEntrant.parse({
+      sujet: 'Fwd: Site AirFit : nouveau message',
+      expediteur: 'mehdi@airfit.co',
+      corpsTexte: `
+        Mehdi Ghariani — +33 7 80 90 37 87 — mehdi@airfit.co
+        You just received a new form submission. Nom & Prénom: GARNI Alain
+        Ville: La Mure
+        Email: dst@mairiedelamure.fr
+        Téléphone: 04 76 00 00 00
+      `,
+    });
+
+    expect(leadDepuisEmail(entree)).toMatchObject({
+      nom: 'GARNI Alain',
+      email: 'dst@mairiedelamure.fr',
+      telephone: '04 76 00 00 00',
+      ville: 'La Mure',
+    });
   });
 
   it('utilise le HTML si le texte brut est absent', () => {

@@ -22,6 +22,12 @@ describe('extraireChamps', () => {
 });
 
 describe('classifier', () => {
+  it('ne confond pas la ville SAINT-SAVIN avec le mot-clé SAV', () => {
+    const r = classifier({ corps: 'Nouveau contact AirFit : CHRISTOPHE MALINS (SAINT-SAVIN)' });
+    expect(r.relation).toBe('prospect');
+    expect(r.initiative).toBe('inbound_site');
+  });
+
   it('détecte une collectivité depuis un domaine public', () => {
     const r = classifier({
       sujet: 'Téléchargement fiche technique',
@@ -35,14 +41,14 @@ describe('classifier', () => {
     expect(scorerLead(r).points).toBe(1);
   });
 
-  it('classe un particulier en B2C', () => {
+  it('ne déduit pas B2C du seul domaine grand public', () => {
     const r = classifier({
       sujet: 'Demande de renseignements',
       expediteur: 'jean.martin@gmail.com',
       corps: 'Bonjour, je voudrais des informations.',
     });
-    expect(r.segment).toBe('b2c');
-    expect(scorerLead(r).points).toBe(0.5);
+    expect(r.segment).toBe('b2b');
+    expect(r.indices.join(' ')).toContain('segment à confirmer');
   });
 
   it('classe en B2B un domaine professionnel', () => {
@@ -93,6 +99,30 @@ describe('classifier', () => {
     });
     expect(r.segment).toBe('b2b');
     expect(r.societe).toBe('Acme SAS');
+  });
+
+  it('reconnaît une association comme une classe distincte', () => {
+    const r = classifier({
+      corps: 'Nom : Camille Martin\nAssociation : Club sportif des Rives\nEmail : camille@club-rives.fr',
+    });
+    expect(r.segment).toBe('association');
+    expect(scorerLead(r).points).toBe(1);
+  });
+
+  it('privilégie l’adresse externe du formulaire à l’expéditeur AirFit', () => {
+    const r = classifier({
+      expediteur: 'Automatisation <notifications@airfit.co>',
+      corps: 'Nom : Marie Dupont\nEmail : marie@mairie-lyon.fr\nMessage : demande de contact',
+    });
+    expect(r.email).toBe('marie@mairie-lyon.fr');
+  });
+
+  it('ignore un contact qui ne contient qu’une adresse AirFit', () => {
+    const r = classifier({
+      corps: 'Nouveau lead AirFit\nNom : Adel\nTéléphone : 06 12 34 56 78\nEmail : adel@airfit.co\nMessage : simulateur',
+    });
+    expect(r.email).toBeNull();
+    expect(r.confiance).toBeLessThan(0.9);
   });
 
   it('rend une confiance faible quand rien n’est identifiable', () => {

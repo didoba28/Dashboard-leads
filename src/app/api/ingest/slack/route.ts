@@ -1,9 +1,10 @@
-import { erreur, gererErreur, ok } from '@/lib/api/http';
+import { erreur, gererErreur, ok, verifierJetonIngestion } from '@/lib/api/http';
 import { creerLead } from '@/lib/db/leads';
 import { schemaLeadInput } from '@/lib/domain/lead';
 import {
   evenementSlackExploitable,
   leadDepuisMessageSlack,
+  parametresDepuisPayloadSlackMake,
   verifierSignatureSlack,
   type EvenementSlackMessage,
 } from '@/lib/ingest/slack';
@@ -26,6 +27,21 @@ export async function POST(request: Request) {
   try {
     // Le corps BRUT est indispensable à la vérification de signature Slack.
     const corpsBrut = await request.text();
+    const autorisation = request.headers.get('authorization') ?? '';
+    const utiliseJetonMake = autorisation.startsWith('Bearer ') || new URL(request.url).searchParams.has('token');
+
+    // Make s'authentifie avec le jeton commun d'ingestion. Il n'a pas à fabriquer
+    // une signature Slack, réservée aux requêtes envoyées directement par Slack.
+    if (utiliseJetonMake) {
+      const erreurJeton = verifierJetonIngestion(request);
+      if (erreurJeton) return erreur(erreurJeton, 401);
+
+      const params = parametresDepuisPayloadSlackMake(JSON.parse(corpsBrut));
+      const parsed = schemaLeadInput.parse(leadDepuisMessageSlack(params));
+      const { lead, doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
+      return ok({ mode: 'make', cree: !doublon, doublon, lead }, { status: doublon ? 200 : 201 });
+    }
+
     const erreurSignature = verifierSignatureSlack({
       corpsBrut,
       timestamp: request.headers.get('x-slack-request-timestamp'),
@@ -55,7 +71,7 @@ export async function POST(request: Request) {
 
     const lead = leadDepuisMessageSlack({
       texte: event.text ?? '',
-      blocs: event.blocks,
+      blocs: [event.blocks, event.attachments].filter((valeur) => valeur != null),
       evenement: event,
       ts: event.ts ?? String(Date.now() / 1000),
       canal: event.channel ?? 'inconnu',
@@ -64,7 +80,7 @@ export async function POST(request: Request) {
     const parsed = schemaLeadInput.parse(lead);
     const { lead: leadCree, doublon } = await creerLead(parsed, { dedupliquer: true, validationRequise: true });
 
-    return ok({ cree: !doublon, doublon, lead: leadCree, retry });
+    return ok({ mode: 'slack', cree: !doublon, doublon, lead: leadCree, retry });
   } catch (err) {
     return gererErreur(err);
   }

@@ -95,4 +95,12 @@ export const MIGRATIONS_SQLITE: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_leads_confirmation ON leads(points_confirmes, date_reception);
     `,
   },
+  {
+    nom: '003_dedupe_unique_active',
+    sql: `
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_dedupe_jour_unique
+        ON leads(dedupe_key, date_reception)
+        WHERE dedupe_key IS NOT NULL AND deleted_at IS NULL;
+    `,
+  },
 ];
