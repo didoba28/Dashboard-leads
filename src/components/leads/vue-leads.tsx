@@ -1,7 +1,7 @@
 'use client';
 
 /** Liste des leads : une barre de filtres unique, un tableau, un panneau latéral. */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import {
   LABELS_INITIATIVE,
@@ -20,7 +20,7 @@ import { Badge, Bouton, Carte, EtatVide, Entree, Interrupteur, Selection, Spinne
 import { Panneau } from '@/components/ui/panneau';
 import { FormulaireLead } from './formulaire-lead';
 import { ImportCsv } from './import-csv';
-import { formaterDateCourte, formaterPoints } from '@/lib/format';
+import { formaterDateCourte, formaterMoisAnnee, formaterPoints } from '@/lib/format';
 import { useToasts } from '@/components/ui/toast';
 import { confirmerSelectionLeads, supprimerSelectionLeads } from '@/app/leads/actions';
 import { RapportAutomatisation } from './rapport-automatisation';
@@ -348,6 +348,25 @@ export function VueLeads({
     }
   }
 
+  const groupesMensuels = useMemo(() => {
+    const groupes = new Map<string, Lead[]>();
+    for (const lead of leads) {
+      const cle = lead.dateReception.slice(0, 7);
+      const groupe = groupes.get(cle);
+      if (groupe) groupe.push(lead);
+      else groupes.set(cle, [lead]);
+    }
+
+    const ordre = [...groupes.keys()].sort((a, b) =>
+      filtres.tri === 'date_asc' ? a.localeCompare(b) : b.localeCompare(a),
+    );
+    return ordre.map((cle) => ({
+      cle,
+      label: formaterMoisAnnee(`${cle}-01`),
+      leads: groupes.get(cle) ?? [],
+    }));
+  }, [filtres.tri, leads]);
+
   const lienExport = `/api/export?${construireQuery(filtres, 0)}`;
 
   return (
@@ -582,7 +601,19 @@ export function VueLeads({
                 </tr>
               </thead>
               <tbody>
-                {leads.map((lead) => {
+                {groupesMensuels.map((groupe) => (
+                  <Fragment key={groupe.cle}>
+                    <tr className="border-y border-hair bg-surface-2/80">
+                      <th colSpan={8} scope="rowgroup" className="px-4 py-2 text-left">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-2">
+                          {groupe.label}
+                        </span>
+                        <span className="ml-2 text-[11px] font-normal text-ink-muted">
+                          {groupe.leads.length} lead{groupe.leads.length > 1 ? 's' : ''}
+                        </span>
+                      </th>
+                    </tr>
+                    {groupe.leads.map((lead) => {
                   const points = pointsDuLead(lead);
                   const pointsProposes = pointsProposesDuLead(lead);
                   const enAttente = lead.validationRequise && !lead.pointsConfirmes;
@@ -677,7 +708,9 @@ export function VueLeads({
                       </td>
                     </tr>
                   );
-                })}
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           )}
