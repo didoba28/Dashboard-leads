@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const filtres = filtresDepuisUrl(new URL(request.url));
-    return ok(await listerLeads(filtres));
+    return ok(await listerLeads(filtres), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (err) {
     return gererErreur(err);
   }

@@ -122,8 +122,8 @@ export function Badge({
         className,
       )}
     >
-      {icone}
-      {children}
+      {icone ? <span className="inline-flex" aria-hidden>{icone}</span> : null}
+      <span>{children}</span>
     </span>
   );
 }

@@ -71,6 +71,7 @@ describe('schéma Notion Suivi des leads', () => {
         [P_SUIVI.canal]: { select: { name: 'Site internet' } },
         [P_SUIVI.sourceProspect]: { rich_text: [{ plain_text: 'Simulateur collectivités' }] },
         [P.typeActivation]: { select: { name: 'Réactivation' } },
+        [P.dateActivation]: { date: { start: '2026-10-12' } },
         [P_SUIVI.pipeline]: { relation: [{ id: 'opportunite-1' }] },
         [P_SUIVI.salesResponsable]: { people: [{ id: 'u1', name: 'Alice Sales' }] },
       },
@@ -103,5 +104,40 @@ describe('schéma Notion Suivi des leads', () => {
     expect(patch.typeActivation).toBe('activation');
     expect(patch.statut).toBe('active');
     expect(patch.tags).toContain("Création d'orga");
+  });
+
+  it('ne date pas une opportunité avec la dernière édition de sa fiche', () => {
+    const { patch } = depuisPageNotion({
+      last_edited_time: '2026-11-20T10:00:00.000Z',
+      properties: {
+        [P.nom]: { type: 'title', title: [{ plain_text: 'Ville' }] },
+        [P.typeActivation]: { select: { name: 'Activation' } },
+      },
+    });
+    expect(patch.dateActivation).toBeUndefined();
+    expect(patch.aVerifier).toBe(true);
+  });
+
+  it('préserve les informations dashboard absentes du tableau Notion lors d’une mise à jour', () => {
+    const { patch } = depuisPageNotion({
+      properties: {
+        [P_SUIVI.secteur]: { select: { name: 'Collectivité Publique' } },
+        [P_SUIVI.salesResponsable]: { people: [{ id: 'u1', name: 'Alice' }] },
+      },
+    }, { preserverChampsAbsents: true });
+    expect(patch).toMatchObject({ segment: 'collectivite', proprietaire: 'Alice' });
+    for (const champ of ['nom', 'email', 'telephone', 'relation', 'sourceCollecte', 'statut', 'pointsOverride']) {
+      expect(Object.hasOwn(patch, champ)).toBe(false);
+    }
+  });
+
+  it('ne remplace pas la société locale par le titre du contact si la colonne Société est absente', () => {
+    const { patch } = depuisPageNotion({
+      properties: {
+        Contact: { type: 'title', title: [{ plain_text: 'Marie Dupont' }] },
+      },
+    }, { preserverChampsAbsents: true });
+    expect(patch.nom).toBe('Marie Dupont');
+    expect(Object.hasOwn(patch, 'societe')).toBe(false);
   });
 });

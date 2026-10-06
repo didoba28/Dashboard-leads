@@ -175,4 +175,11 @@ describe('schemaLeadInput', () => {
       schemaLeadInput.safeParse({ segment: 'b2b', typeDemande: 'demande_prix', dateReception: '05/10/2026' }).success,
     ).toBe(false);
   });
+
+  it('rejette les dates impossibles sans normaliser silencieusement', () => {
+    for (const dateReception of ['2026-02-29', '2026-04-31', '2026-13-01']) {
+      expect(schemaLeadInput.safeParse({ segment: 'b2b', typeDemande: 'demande_prix', dateReception }).success).toBe(false);
+    }
+    expect(schemaLeadInput.safeParse({ segment: 'b2b', typeDemande: 'demande_prix', dateReception: '2028-02-29' }).success).toBe(true);
+  });
 });

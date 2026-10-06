@@ -1,5 +1,6 @@
 /** Dépôt de données des leads : lecture, écriture, filtres et déduplication. */
 import { getDb, maintenantIso, nouvelId, type PiloteDonnees } from './index';
+import { z } from 'zod';
 import {
   calculerDedupeKey,
   clesIdentiteDedupe,
@@ -12,21 +13,28 @@ import {
   AUTEUR_VALIDATION_AUTOMATIQUE,
   evaluerValidationAutomatique,
 } from '@/lib/domain/automation';
-import { construirePeriode } from '@/lib/domain/periods';
+import { construirePeriode, estIdPeriodeValide } from '@/lib/domain/periods';
 import {
   extraireIdentiteNotificationSlack,
   leadDepuisMessageSlack,
   parametresDepuisPayloadSlackMake,
 } from '@/lib/ingest/slack';
 import { lireReglages } from './settings';
-import type {
-  Initiative,
-  Relation,
-  Segment,
-  SourceCollecte,
-  Statut,
-  TypeActivation,
-  TypeDemande,
+import {
+  INITIATIVES,
+  RELATIONS,
+  SEGMENTS,
+  SOURCES_COLLECTE,
+  STATUTS,
+  STATUTS_OPPORTUNITE,
+  TYPES_DEMANDE,
+  type Initiative,
+  type Relation,
+  type Segment,
+  type SourceCollecte,
+  type Statut,
+  type TypeActivation,
+  type TypeDemande,
 } from '@/lib/domain/taxonomy';
 
 interface LigneLead {
@@ -144,7 +152,7 @@ async function normaliserSegmentsSlack(db: PiloteDonnees): Promise<void> {
 }
 
 /**
- * Répare à la lecture les anciennes notifications Slack créées avant la prise
+ * Répare pendant la maintenance les anciennes notifications Slack créées avant la prise
  * en charge du titre compact et des blocs détaillant l'origine du lead.
  * Une identité déjà saisie et un type déjà qualifié ne sont jamais remplacés.
  */
@@ -251,6 +259,8 @@ const COLONNES = `id, date_reception, nom, email, telephone, societe, fonction, 
 
 export interface FiltresLeads {
   periode?: string;
+  /** Période de l'activation, indépendante de la date de réception. */
+  periodeActivation?: string;
   dateDebut?: string;
   dateFin?: string;
   segment?: Segment[];
@@ -262,6 +272,10 @@ export interface FiltresLeads {
   eligible?: boolean;
   aVerifier?: boolean;
   pointsConfirmes?: boolean;
+  /** Exclusions confirmées, selon les points réellement comptabilisés. */
+  pointsExclus?: boolean;
+  /** Même qualification que estOpportuniteInbound, pour les liens de KPI. */
+  opportunitesInbound?: boolean;
   proprietaire?: string;
   /** Recherche plein texte simple sur nom, e-mail, société, message. */
   q?: string;
@@ -269,6 +283,46 @@ export interface FiltresLeads {
   limite?: number;
   offset?: number;
 }
+
+const dateFiltre = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format YYYY-MM-DD')
+  .refine((valeur) => {
+    const date = new Date(`${valeur}T00:00:00.000Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === valeur;
+  }, 'Date inexistante');
+
+const periodeFiltre = z.string().refine(estIdPeriodeValide, 'Période attendue au format YYYY-Q[1-4]');
+
+/** Même contrat pour les URL, les rendus serveur et les lectures programmées. */
+export const schemaFiltresLeads = z.object({
+  periode: periodeFiltre.optional(),
+  periodeActivation: periodeFiltre.optional(),
+  dateDebut: dateFiltre.optional(),
+  dateFin: dateFiltre.optional(),
+  segment: z.array(z.enum(SEGMENTS)).optional(),
+  relation: z.array(z.enum(RELATIONS)).optional(),
+  typeDemande: z.array(z.enum(TYPES_DEMANDE)).optional(),
+  initiative: z.array(z.enum(INITIATIVES)).optional(),
+  sourceCollecte: z.array(z.enum(SOURCES_COLLECTE)).optional(),
+  statut: z.array(z.enum(STATUTS)).optional(),
+  eligible: z.boolean().optional(),
+  aVerifier: z.boolean().optional(),
+  pointsConfirmes: z.boolean().optional(),
+  pointsExclus: z.boolean().optional(),
+  opportunitesInbound: z.boolean().optional(),
+  proprietaire: z.string().trim().max(500).optional(),
+  q: z.string().trim().max(500).optional(),
+  tri: z.enum(['date_desc', 'date_asc', 'points_desc', 'maj_desc']).optional(),
+  limite: z.number().int().min(1).max(1000).optional(),
+  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+}).superRefine((filtres, ctx) => {
+  const periode = filtres.periode && estIdPeriodeValide(filtres.periode)
+    ? construirePeriode(filtres.periode) : null;
+  const debut = filtres.dateDebut ?? periode?.debut;
+  const fin = filtres.dateFin ?? periode?.fin;
+  if (debut && fin && debut > fin) {
+    ctx.addIssue({ code: 'custom', path: ['dateFin'], message: 'La date de fin doit être postérieure ou égale à la date de début.' });
+  }
+});
 
 interface ClauseWhere {
   sql: string;
@@ -278,6 +332,12 @@ interface ClauseWhere {
 function construireWhere(f: FiltresLeads): ClauseWhere {
   const conditions: string[] = ['deleted_at IS NULL'];
   const params: unknown[] = [];
+
+  if (f.periodeActivation) {
+    const activation = construirePeriode(f.periodeActivation);
+    conditions.push('date_activation >= ? AND date_activation <= ?');
+    params.push(activation.debut, activation.fin);
+  }
 
   let debut = f.dateDebut;
   let fin = f.dateFin;
@@ -322,6 +382,15 @@ function construireWhere(f: FiltresLeads): ClauseWhere {
     conditions.push('points_confirmes = ?');
     params.push(f.pointsConfirmes ? 1 : 0);
   }
+  if (f.pointsExclus !== undefined) {
+    conditions.push('points_confirmes = ?');
+    params.push(1);
+    conditions.push(`coalesce(points_override, CASE WHEN eligible THEN points ELSE 0 END) ${f.pointsExclus ? '<=' : '>'} 0`);
+  }
+  if (f.opportunitesInbound) {
+    conditions.push(`points_confirmes = ? AND eligible = ? AND eligible_activation = ? AND statut IN (${STATUTS_OPPORTUNITE.map(() => '?').join(', ')})`);
+    params.push(1, 1, 1, ...STATUTS_OPPORTUNITE);
+  }
   if (f.proprietaire) {
     conditions.push('proprietaire = ?');
     params.push(f.proprietaire);
@@ -343,17 +412,17 @@ function construireWhere(f: FiltresLeads): ClauseWhere {
 }
 
 const TRIS: Record<NonNullable<FiltresLeads['tri']>, string> = {
-  date_desc: 'date_reception DESC, created_at DESC',
-  date_asc: 'date_reception ASC, created_at ASC',
-  points_desc: 'points DESC, date_reception DESC',
-  maj_desc: 'updated_at DESC',
+  date_desc: 'date_reception DESC, created_at DESC, id DESC',
+  date_asc: 'date_reception ASC, created_at ASC, id ASC',
+  points_desc: 'points DESC, date_reception DESC, id DESC',
+  maj_desc: 'updated_at DESC, id DESC',
 };
 
 export async function listerLeads(
   filtres: FiltresLeads = {},
 ): Promise<{ leads: Lead[]; total: number }> {
+  filtres = schemaFiltresLeads.parse(filtres);
   const db = await getDb();
-  await normaliserSegmentsSlack(db);
   const where = construireWhere(filtres);
   const tri = TRIS[filtres.tri ?? 'date_desc'];
   const limite = Math.min(Math.max(filtres.limite ?? 100, 1), 1000);
@@ -371,21 +440,24 @@ export async function listerLeads(
     [...where.params, limite, offset],
   );
 
-  await reparerLeadsSlackAnciens(db, lignes);
-
   return { leads: lignes.map(versLead), total };
 }
 
 /** Tous les leads correspondant aux filtres, sans pagination (agrégations). */
-export async function listerTousLeads(filtres: FiltresLeads = {}): Promise<Lead[]> {
+export async function listerTousLeads(
+  filtres: FiltresLeads = {},
+  options: { inclureDetails?: boolean } = {},
+): Promise<Lead[]> {
+  filtres = schemaFiltresLeads.parse(filtres);
   const db = await getDb();
-  await normaliserSegmentsSlack(db);
   const where = construireWhere(filtres);
+  const colonnes = options.inclureDetails === false
+    ? COLONNES.replace(/\bmessage\b/, 'NULL AS message').replace(/\braw_payload\b/, 'NULL AS raw_payload')
+    : COLONNES;
   const lignes = await db.all<LigneLead>(
-    `SELECT ${COLONNES} FROM leads WHERE ${where.sql} ORDER BY date_reception ASC`,
+    `SELECT ${colonnes} FROM leads WHERE ${where.sql} ORDER BY date_reception ASC, id ASC`,
     where.params,
   );
-  await reparerLeadsSlackAnciens(db, lignes);
   return lignes.map(versLead);
 }
 
@@ -793,6 +865,7 @@ export interface ResultatRetraitementAutomatique {
   examines: number;
   valides: number;
   clesDedupeActualisees: number;
+  conflitsDedupe: number;
 }
 
 /**
@@ -801,9 +874,12 @@ export interface ResultatRetraitementAutomatique {
  */
 export async function retraiterAutomatisationHistorique(): Promise<ResultatRetraitementAutomatique> {
   const db = await getDb();
+  await normaliserSegmentsSlack(db);
   const lignes = await db.all<LigneLead>(`SELECT ${COLONNES} FROM leads WHERE deleted_at IS NULL`);
+  await reparerLeadsSlackAnciens(db, lignes);
   let valides = 0;
   let clesDedupeActualisees = 0;
+  let conflitsDedupe = 0;
 
   for (const ligne of lignes) {
     const lead = versLead(ligne);
@@ -819,8 +895,29 @@ export async function retraiterAutomatisationHistorique(): Promise<ResultatRetra
       dateReception: lead.dateReception,
     });
     if (dedupeKey !== lead.dedupeKey) {
-      await db.run('UPDATE leads SET dedupe_key = ? WHERE id = ? AND deleted_at IS NULL', [dedupeKey, lead.id]);
-      clesDedupeActualisees++;
+      const resultat = await db.run(
+        `UPDATE leads SET dedupe_key = ? WHERE id = ? AND deleted_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM leads autre WHERE autre.id <> leads.id
+             AND autre.deleted_at IS NULL AND autre.dedupe_key = ?
+             AND autre.date_reception = leads.date_reception
+         )`,
+        [dedupeKey, lead.id, dedupeKey],
+      );
+      if (resultat.changes === 0) {
+        // Une ancienne identité commune ne doit ni bloquer la synchronisation,
+        // ni être auto-validée. Elle reste visible pour un arbitrage humain.
+        const collision = dedupeKey && await db.get<{ id: string }>(
+          'SELECT id FROM leads WHERE dedupe_key = ? AND date_reception = ? AND id <> ? AND deleted_at IS NULL',
+          [dedupeKey, lead.dateReception, lead.id],
+        );
+        if (collision) {
+          conflitsDedupe++;
+          await db.run('UPDATE leads SET a_verifier = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL AND a_verifier = ?', [1, maintenantIso(), lead.id, 0]);
+        }
+        continue;
+      }
+      clesDedupeActualisees += resultat.changes;
     }
 
     if (!lead.validationRequise || lead.pointsConfirmes) continue;
@@ -835,7 +932,7 @@ export async function retraiterAutomatisationHistorique(): Promise<ResultatRetra
     valides += resultat.changes;
   }
 
-  return { examines: lignes.length, valides, clesDedupeActualisees };
+  return { examines: lignes.length, valides, clesDedupeActualisees, conflitsDedupe };
 }
 
 /** Derniers leads confirmés par l'automatisation, pour le mini rapport UI. */
@@ -936,13 +1033,14 @@ export async function leadsAPousser(options: { tous?: boolean } = {}): Promise<L
 /** Recalcule le score de tous les leads (après changement d'arbitrage). */
 export async function rescorerTout(): Promise<number> {
   const db = await getDb();
+  const reglages = await lireReglages();
   const lignes = await db.all<LigneLead>(`SELECT ${COLONNES} FROM leads WHERE deleted_at IS NULL`);
   const now = maintenantIso();
   let n = 0;
   await db.transaction(async (tx) => {
     for (const ligne of lignes) {
       const lead = versLead(ligne);
-      const score = await appliquerScoring(lead);
+      const score = scorerLead(lead, { arbitrageB2cNewsletter: reglages.arbitrageB2cNewsletter });
       if (
         score.eligible === lead.eligible &&
         score.points === lead.points &&

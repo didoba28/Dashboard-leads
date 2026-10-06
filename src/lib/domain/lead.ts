@@ -79,9 +79,16 @@ export interface Lead {
   updatedAt: string;
 }
 
+/** Une date calendaire réelle, sans normalisation silencieuse du 31 février. */
+export function estDateSimpleValide(valeur: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(valeur)) return false;
+  const date = new Date(`${valeur}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === valeur;
+}
+
 const dateSimple = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format YYYY-MM-DD');
+  .refine(estDateSimpleValide, 'Date calendaire invalide (format attendu YYYY-MM-DD)');
 
 const texteOptionnel = z
   .string()

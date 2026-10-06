@@ -17,7 +17,12 @@ export default async function PageObjectifs({
   const reglages = await lireReglages();
   const demande = typeof params['periode'] === 'string' ? params['periode'] : null;
   const periode = demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
-  const kpis = calculerKpis(await listerTousLeads({ periode }));
+  const [leads, activations, objectif] = await Promise.all([
+    listerTousLeads({ periode }, { inclureDetails: false }),
+    listerTousLeads({ periodeActivation: periode }, { inclureDetails: false }),
+    lireObjectif(periode),
+  ]);
+  const kpis = calculerKpis(leads, activations, construirePeriode(periode));
 
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-5">
@@ -25,7 +30,7 @@ export default async function PageObjectifs({
         <div>
           <h1 className="text-lg font-semibold tracking-tight text-ink">Objectifs & primes</h1>
           <p className="mt-0.5 text-xs text-ink-muted">
-            {construirePeriode(periode).label} · les paliers s’appliquent à cette période uniquement
+            {construirePeriode(periode).label} · points par réception, opportunités par date d’activation
           </p>
         </div>
         <SelecteurPeriode
@@ -35,7 +40,7 @@ export default async function PageObjectifs({
       </header>
 
       <EditeurObjectif
-        objectifInitial={await lireObjectif(periode)}
+        objectifInitial={objectif}
         pointsReels={kpis.points}
         opportunitesReelles={kpis.opportunites}
       />

@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fermerDb, getDb } from './index';
 import {
   creerLead,
@@ -120,6 +120,18 @@ function definirTests(): void {
     expect((await retraiterAutomatisationHistorique()).valides).toBe(1);
     expect((await retraiterAutomatisationHistorique()).valides).toBe(0);
     expect((await lireLead(lead.id))?.pointsConfirmesPar).toBe(AUTEUR_VALIDATION_AUTOMATIQUE);
+  });
+
+  it('signale une collision de clé historique sans arrêter la maintenance ni auto-valider le doublon', async () => {
+    const premier = await creerLead(entreeLead({ email: 'collision@exemple.fr' }));
+    const second = await creerLead(entreeLead({ email: 'ancienne-identite@exemple.fr', sourceCollecte: 'site_web', confiance: 0.5 }), { validationRequise: true });
+    const db = await getDb();
+    await db.run('UPDATE leads SET email = ?, dedupe_key = NULL, confiance = ?, a_verifier = ? WHERE id = ?', ['collision@exemple.fr', 0.95, 0, second.lead.id]);
+    const maintenance = await retraiterAutomatisationHistorique();
+    expect(maintenance.conflitsDedupe).toBe(1);
+    expect(maintenance.valides).toBe(0);
+    expect(await lireLead(second.lead.id)).toMatchObject({ aVerifier: true, pointsConfirmes: false });
+    expect(await lireLead(premier.lead.id)).toMatchObject({ pointsConfirmes: true });
   });
 
   it('confirme et supprime une sélection de leads en lot', async () => {
@@ -282,7 +294,7 @@ function definirTests(): void {
     expect((await listerLeads({})).total).toBe(1);
   });
 
-  it('répare le nom et la ville des anciennes notifications Slack compactes', async () => {
+  it('répare explicitement le nom et la ville des anciennes notifications Slack compactes', async () => {
     const { lead } = await creerLead(
       entreeLead({
         nom: null,
@@ -292,6 +304,7 @@ function definirTests(): void {
       }),
     );
 
+    await retraiterAutomatisationHistorique();
     const { leads } = await listerLeads({});
     expect(leads[0]).toMatchObject({ nom: 'de Cuniac Titouan', ville: 'Nancy' });
     expect(await lireLead(lead.id)).toMatchObject({ nom: 'de Cuniac Titouan', ville: 'Nancy' });
@@ -308,6 +321,7 @@ function definirTests(): void {
     );
     await confirmerPointsLead(lead.id, 'adel@airfit.co');
 
+    await retraiterAutomatisationHistorique();
     const resultat = await listerLeads({ segment: ['collectivite'] });
     expect(resultat.total).toBe(1);
     expect(resultat.leads[0]).toMatchObject({
@@ -333,6 +347,7 @@ function definirTests(): void {
       { validationRequise: true },
     );
 
+    await retraiterAutomatisationHistorique();
     const { leads } = await listerLeads({});
     expect(leads[0]).toMatchObject({
       nom: 'CHRISTOPHE MALINS',
@@ -360,6 +375,7 @@ function definirTests(): void {
       }),
     );
 
+    await retraiterAutomatisationHistorique();
     const { leads } = await listerLeads({});
     expect(leads[0]).toMatchObject({ typeDemande: 'simulateur', leadMagnet: 'simulateur' });
     expect(await lireLead(lead.id)).toMatchObject({ typeDemande: 'simulateur', leadMagnet: 'simulateur' });
@@ -381,6 +397,69 @@ function definirTests(): void {
     expect(derniere.total).toBe(5);
     expect(derniere.leads).toHaveLength(1);
     expect(derniere.leads[0]?.dateReception).toBe('2026-10-05');
+  });
+
+  it('les lectures ne réparent ni ne valident les anciennes lignes et ne font aucune écriture', async () => {
+    const { lead } = await creerLead(entreeLead({
+      nom: null, ville: null, sourceCollecte: 'slack_inbound',
+      message: 'Nouveau lead AirFit : Camille Martin (Lyon)',
+      confiance: 0.5, aVerifier: false,
+    }), { validationRequise: true });
+    await mettreAJourLead(lead.id, { confiance: 0.95 });
+    const avant = await lireLead(lead.id);
+    const db = await getDb();
+    const ecritures = vi.spyOn(db, 'run');
+    try {
+      await listerLeads();
+      await listerTousLeads();
+      expect(ecritures).not.toHaveBeenCalled();
+      expect(await lireLead(lead.id)).toEqual(avant);
+    } finally {
+      ecritures.mockRestore();
+    }
+    await retraiterAutomatisationHistorique();
+    expect(await lireLead(lead.id)).toMatchObject({
+      nom: 'Camille Martin', ville: 'Lyon', segment: 'collectivite', pointsConfirmes: true,
+    });
+  });
+
+  it('stabilise les pages lorsque date, points et horodatages sont identiques', async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      ids.push((await creerLead(entreeLead({ email: `stable${i}@exemple.fr` }))).lead.id);
+    }
+    const db = await getDb();
+    await db.run('UPDATE leads SET created_at = ?, updated_at = ?', ['2026-10-15T12:00:00Z', '2026-10-15T12:00:00Z']);
+    for (const tri of ['date_asc', 'date_desc', 'points_desc', 'maj_desc'] as const) {
+      const premiere = await listerLeads({ tri, limite: 2 });
+      const seconde = await listerLeads({ tri, limite: 2, offset: 2 });
+      const attendus = [...ids].sort();
+      if (tri !== 'date_asc') attendus.reverse();
+      expect([...premiere.leads, ...seconde.leads].map((lead) => lead.id)).toEqual(attendus);
+    }
+  });
+
+  it('sélectionne les activations d’un trimestre indépendamment de la réception', async () => {
+    const ancien = await creerLead(entreeLead({ email: 'ancien@exemple.fr', dateReception: '2026-09-10', dateActivation: '2026-10-05', statut: 'active' }));
+    await creerLead(entreeLead({ email: 'recent@exemple.fr', dateReception: '2026-10-10', dateActivation: '2026-09-20', statut: 'active' }));
+    await creerLead(entreeLead({ email: 'sans-date@exemple.fr', dateReception: '2026-10-10', statut: 'active' }));
+    expect((await listerTousLeads({ periodeActivation: '2026-Q4' })).map((lead) => lead.id)).toEqual([ancien.lead.id]);
+  });
+
+  it('filtre les exclusions confirmées en tenant compte des arbitrages manuels', async () => {
+    const exclu = await creerLead(entreeLead({ email: 'exclu@exemple.fr', relation: 'client' }));
+    const arbitre = await creerLead(entreeLead({ email: 'arbitre@exemple.fr', pointsOverride: 0 }));
+    const retabli = await creerLead(entreeLead({ email: 'retabli@exemple.fr', relation: 'client', pointsOverride: 1 }));
+    await creerLead(entreeLead({ email: 'attente@exemple.fr', relation: 'client' }), { validationRequise: true });
+    expect((await listerLeads({ pointsExclus: true })).leads.map((lead) => lead.id).sort()).toEqual([exclu.lead.id, arbitre.lead.id].sort());
+    expect((await listerLeads({ pointsExclus: false })).leads.map((lead) => lead.id)).toEqual([retabli.lead.id]);
+  });
+
+  it('omet les détails volumineux dans les lectures statistiques sans modifier la fiche', async () => {
+    const { lead } = await creerLead(entreeLead({ message: 'Détail utile pour la fiche', rawPayload: { formulaire: 'simulateur' } }));
+    const stats = await listerTousLeads({}, { inclureDetails: false });
+    expect(stats[0]).toMatchObject({ id: lead.id, message: null, rawPayload: null, points: 1 });
+    expect(await lireLead(lead.id)).toMatchObject({ message: 'Détail utile pour la fiche', rawPayload: { formulaire: 'simulateur' } });
   });
 
   it('supprime logiquement un lead : il disparaît des listes', async () => {
@@ -417,8 +496,15 @@ function definirTests(): void {
     expect(lead.regleId).toBe('newsletter.lead_magnet');
 
     await ecrireReglages({ arbitrageB2cNewsletter: 'segment' });
-    const nbRescores = await rescorerTout();
-    expect(nbRescores).toBe(1);
+    const db = await getDb();
+    const lectures = vi.spyOn(db, 'all');
+    try {
+      const nbRescores = await rescorerTout();
+      expect(nbRescores).toBe(1);
+      expect(lectures.mock.calls.filter(([sql]) => sql.includes('FROM reglages'))).toHaveLength(1);
+    } finally {
+      lectures.mockRestore();
+    }
 
     const relu = await lireLead(lead.id);
     expect(relu?.points).toBe(0.5);

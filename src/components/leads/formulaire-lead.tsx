@@ -15,6 +15,7 @@ import {
   SEGMENTS,
   SOURCES_COLLECTE,
   STATUTS,
+  STATUTS_OPPORTUNITE,
   TYPES_ACTIVATION,
   TYPES_DEMANDE,
   type Initiative,
@@ -26,8 +27,9 @@ import {
   type TypeDemande,
 } from '@/lib/domain/taxonomy';
 import { scorerLead } from '@/lib/domain/scoring';
-import type { Lead } from '@/lib/domain/lead';
-import { Bouton, Champ, Entree, Selection, ZoneTexte } from '@/components/ui/primitives';
+import { estDateSimpleValide, pointsDuLead, type Lead } from '@/lib/domain/lead';
+import { formaterDateHeure, formaterPoints } from '@/lib/format';
+import { Badge, Bouton, Champ, Entree, Selection, ZoneTexte } from '@/components/ui/primitives';
 import { useToasts } from '@/components/ui/toast';
 import { DetailsAutomatisation } from './details-automatisation';
 import { AperçuScore } from './apercu-score';
@@ -131,17 +133,34 @@ export function FormulaireLead({
   lead,
   onEnregistre,
   onAnnuler,
+  onModificationsChange,
 }: {
   lead: Lead | null;
   onEnregistre: (lead: Lead) => void;
   onAnnuler: () => void;
+  onModificationsChange?: (modifie: boolean) => void;
 }) {
   const [v, setV] = useState<ValeursLead>(() => valeursDepuisLead(lead));
   const [enCours, setEnCours] = useState(false);
   const [erreurs, setErreurs] = useState<Record<string, string>>({});
   const { notifier } = useToasts();
+  const initiales = useMemo(() => valeursDepuisLead(lead), [lead]);
+  const modifie = JSON.stringify(v) !== JSON.stringify(initiales);
 
-  useEffect(() => setV(valeursDepuisLead(lead)), [lead]);
+  useEffect(() => {
+    setV(initiales);
+    setErreurs({});
+  }, [initiales]);
+  useEffect(() => onModificationsChange?.(modifie), [modifie, onModificationsChange]);
+  useEffect(() => {
+    if (!modifie) return;
+    function proteger(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+    window.addEventListener('beforeunload', proteger);
+    return () => window.removeEventListener('beforeunload', proteger);
+  }, [modifie]);
 
   const score = useMemo(
     () =>
@@ -167,6 +186,20 @@ export function FormulaireLead({
   }
 
   async function enregistrer(confirmer: boolean) {
+    const controle: Record<string, string> = {};
+    if (!estDateSimpleValide(v.dateReception)) controle.dateReception = 'Renseignez une date de réception valide.';
+    const opportunite = STATUTS_OPPORTUNITE.includes(v.statut) || v.typeActivation !== '';
+    if (opportunite && !estDateSimpleValide(v.dateActivation)) {
+      controle.dateActivation = 'Une opportunité doit avoir une date d’activation pour être rattachée au bon trimestre.';
+    }
+    if (v.pointsOverride !== '' && !v.pointsOverrideRaison.trim()) {
+      controle.pointsOverrideRaison = 'Expliquez pourquoi vous remplacez le calcul automatique.';
+    }
+    if (Object.keys(controle).length > 0) {
+      setErreurs(controle);
+      notifier({ ton: 'erreur', titre: 'Champs à compléter', detail: Object.values(controle)[0] });
+      return;
+    }
     setEnCours(true);
     setErreurs({});
     try {
@@ -189,13 +222,19 @@ export function FormulaireLead({
       if (confirmer && lead) {
         const confirmation = await fetch(`/api/leads/${lead.id}/confirmer`, { method: 'POST' });
         const donneesConfirmation = await confirmation.json();
-        if (!confirmation.ok) throw new Error(donneesConfirmation?.erreur ?? 'Confirmation impossible');
+        if (!confirmation.ok) {
+          notifier({ ton: 'erreur', titre: 'Lead enregistré, points non confirmés', detail: donneesConfirmation?.erreur ?? 'Réessayez la confirmation.' });
+          onModificationsChange?.(false);
+          onEnregistre(resultat);
+          return;
+        }
         resultat = donneesConfirmation as Lead;
       }
       notifier({
         ton: 'succes',
         titre: confirmer ? 'Points confirmés et comptabilisés' : lead ? 'Lead mis à jour' : 'Lead créé',
       });
+      onModificationsChange?.(false);
       onEnregistre(resultat);
     } catch (err) {
       notifier({ ton: 'erreur', titre: 'Erreur réseau', detail: err instanceof Error ? err.message : String(err) });
@@ -212,11 +251,37 @@ export function FormulaireLead({
   return (
     <form onSubmit={soumettre} className="flex h-full flex-col">
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+        {lead ? (
+          <section className="rounded-lg border border-hair bg-surface-2 p-3.5" aria-label="Traçabilité du lead">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold text-ink">Traçabilité</h3>
+              <Badge ton={lead.pointsConfirmes ? 'bon' : 'attention'}>
+                {lead.pointsConfirmes ? `${formaterPoints(pointsDuLead(lead))} pt comptabilisé` : 'Validation en attente'}
+              </Badge>
+            </div>
+            <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+              <div><dt className="text-ink-muted">Reçu dans le dashboard</dt><dd className="mt-0.5 text-ink-2">{formaterDateHeure(lead.createdAt)}</dd></div>
+              <div><dt className="text-ink-muted">Dernière modification</dt><dd className="mt-0.5 text-ink-2">{formaterDateHeure(lead.updatedAt)}</dd></div>
+              <div className="col-span-2"><dt className="text-ink-muted">Validation</dt><dd className="mt-0.5 break-words text-ink-2">
+                {lead.pointsConfirmes
+                  ? `${lead.pointsConfirmesLe ? formaterDateHeure(lead.pointsConfirmesLe) : 'Date non renseignée'} · ${lead.pointsConfirmesPar ?? 'Auteur non renseigné'}`
+                  : 'Les points proposés ne participent pas encore aux objectifs.'}
+              </dd></div>
+              {lead.notionLastSyncedAt ? <div className="col-span-2"><dt className="text-ink-muted">Dernière synchronisation Notion</dt><dd className="mt-0.5 text-ink-2">{formaterDateHeure(lead.notionLastSyncedAt)}</dd></div> : null}
+            </dl>
+            <div className="mt-3 flex flex-wrap gap-2 border-t border-hair pt-2">
+              {lead.email ? <a className="text-xs text-[var(--s1)] underline underline-offset-2" href={`mailto:${lead.email}`}>Envoyer un e-mail</a> : null}
+              {lead.telephone ? <a className="text-xs text-[var(--s1)] underline underline-offset-2" href={`tel:${lead.telephone.replace(/[^+\d]/g, '')}`}>Appeler</a> : null}
+              {lead.notionPageId ? <a className="text-xs text-[var(--s1)] underline underline-offset-2" href={`https://www.notion.so/${lead.notionPageId.replace(/-/g, '')}`} target="_blank" rel="noreferrer">Ouvrir dans Notion ↗</a> : null}
+            </div>
+          </section>
+        ) : null}
         <AperçuScore
           score={score}
           pointsForces={v.pointsOverride === '' ? null : Number(v.pointsOverride)}
-          enAttente={Boolean(lead?.validationRequise && !lead.pointsConfirmes)}
+          enAttente={Boolean(lead?.validationRequise && (!lead.pointsConfirmes || scoreModifie))}
         />
+        {scoreModifie && lead?.pointsConfirmes ? <p role="status" className="rounded-lg border border-[var(--warning)] p-3 text-xs text-ink-2">La qualification change le score : les points devront être reconfirmés après l’enregistrement.</p> : null}
 
         {lead?.rawPayload ? <DetailsAutomatisation lead={lead} /> : null}
 
@@ -318,7 +383,7 @@ export function FormulaireLead({
                 {optionsDe(TYPES_ACTIVATION, LABELS_TYPE_ACTIVATION)}
               </Selection>
             </Champ>
-            <Champ label="Date d’activation" erreur={erreurs['dateActivation']}>
+            <Champ label="Date d’activation" aide="Les opportunités comptent dans le trimestre de cette date, indépendamment de la réception." erreur={erreurs['dateActivation']}>
               <Entree
                 type="date"
                 value={v.dateActivation}
@@ -347,7 +412,7 @@ export function FormulaireLead({
                 <option value="1">1 point</option>
               </Selection>
             </Champ>
-            <Champ label="Raison de l’arbitrage">
+            <Champ label="Raison de l’arbitrage" erreur={erreurs['pointsOverrideRaison']}>
               <Entree
                 value={v.pointsOverrideRaison}
                 onChange={(e) => set('pointsOverrideRaison', e.target.value)}
@@ -367,8 +432,9 @@ export function FormulaireLead({
         </section>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-hair px-5 py-3">
-        <Bouton type="button" variante="discret" onClick={onAnnuler}>
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-hair px-5 py-3">
+        {modifie ? <span role="status" className="mr-auto text-xs text-ink-muted">Modifications non enregistrées</span> : null}
+        <Bouton type="button" variante="discret" onClick={onAnnuler} disabled={enCours}>
           Annuler
         </Bouton>
         <Bouton type="submit" variante={confirmationDisponible ? 'secondaire' : 'principal'} enCours={enCours}>

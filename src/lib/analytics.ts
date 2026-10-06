@@ -5,7 +5,7 @@
  * faible et cela garantit que les chiffres affichés sortent exactement du même
  * code que le moteur de scoring (pas de logique métier dupliquée en SQL).
  */
-import { estOpportuniteInbound, pointsDuLead, type Lead } from './domain/lead';
+import { estDateSimpleValide, estOpportuniteInbound, pointsDuLead, type Lead } from './domain/lead';
 import {
   avancementPeriode,
   construirePeriode,
@@ -64,6 +64,10 @@ export interface Kpis {
   pointsInbound: number;
   pointsOutbound: number;
   opportunites: number;
+  /** Opportunités parmi les leads reçus dans la période (cohorte). */
+  opportunitesCohorte: number;
+  /** Activations sans date fiable : visibles comme anomalie, non attribuées. */
+  opportunitesSansDate: number;
   activations: number;
   reactivations: number;
   tauxActivation: number;
@@ -145,7 +149,11 @@ function regrouper<T extends string>(
   return options.limite ? out.slice(0, options.limite) : out;
 }
 
-export function calculerKpis(leads: Lead[]): Kpis {
+export function calculerKpis(
+  leads: Lead[],
+  leadsActivations: Lead[] = leads,
+  periodeActivation?: Periode,
+): Kpis {
   const kpis: Kpis = {
     leadsTotal: leads.length,
     leadsEligibles: 0,
@@ -155,6 +163,8 @@ export function calculerKpis(leads: Lead[]): Kpis {
     pointsInbound: 0,
     pointsOutbound: 0,
     opportunites: 0,
+    opportunitesCohorte: 0,
+    opportunitesSansDate: 0,
     activations: 0,
     reactivations: 0,
     tauxActivation: 0,
@@ -171,23 +181,35 @@ export function calculerKpis(leads: Lead[]): Kpis {
     if (INITIATIVES_OUTBOUND.includes(lead.initiative)) kpis.pointsOutbound += points;
     else kpis.pointsInbound += points;
     if (estOpportuniteInbound(lead)) {
-      kpis.opportunites += 1;
-      if (lead.statut === 'reactive' || lead.typeActivation === 'reactivation') kpis.reactivations += 1;
-      else kpis.activations += 1;
+      if (!lead.dateActivation || !estDateSimpleValide(lead.dateActivation)) kpis.opportunitesSansDate += 1;
+      else if (points > 0) kpis.opportunitesCohorte += 1;
     }
     if (lead.aVerifier) kpis.leadsAVerifier += 1;
     if (!lead.proprietaire) kpis.leadsSansProprietaire += 1;
+  }
+
+  // Le flux d'opportunités est rattaché à la date d'activation, jamais à la
+  // réception. Une activation T4 d'un lead T3 compte ainsi en T4 uniquement.
+  const idsComptes = new Set<string>();
+  for (const lead of leadsActivations) {
+    const date = lead.dateActivation;
+    if (idsComptes.has(lead.id) || !estOpportuniteInbound(lead) || !date || !estDateSimpleValide(date)) continue;
+    if (periodeActivation && (date < periodeActivation.debut || date > periodeActivation.fin)) continue;
+    idsComptes.add(lead.id);
+    kpis.opportunites += 1;
+    if (lead.statut === 'reactive' || lead.typeActivation === 'reactivation') kpis.reactivations += 1;
+    else kpis.activations += 1;
   }
 
   kpis.points = arrondi(kpis.points);
   kpis.pointsInbound = arrondi(kpis.pointsInbound);
   kpis.pointsOutbound = arrondi(kpis.pointsOutbound);
   kpis.tauxActivation =
-    kpis.leadsEligibles > 0 ? arrondi((kpis.opportunites / kpis.leadsEligibles) * 100) : 0;
+    kpis.leadsEligibles > 0 ? arrondi((kpis.opportunitesCohorte / kpis.leadsEligibles) * 100) : 0;
   return kpis;
 }
 
-function construireSerie(leads: Lead[], periode: Periode, ciblePoints: number): PointSerie[] {
+function construireSerie(leads: Lead[], activations: Lead[], periode: Periode, ciblePoints: number): PointSerie[] {
   const semaines: string[] = [];
   const curseur = new Date(`${debutSemaine(periode.debut)}T00:00:00Z`);
   const fin = new Date(`${periode.fin}T00:00:00Z`);
@@ -217,7 +239,16 @@ function construireSerie(leads: Lead[], periode: Periode, ciblePoints: number): 
     if (INITIATIVES_OUTBOUND.includes(lead.initiative)) entree.outbound += points;
     else if (lead.initiative === 'newsletter') entree.newsletter += points;
     else entree.site += points;
-    if (estOpportuniteInbound(lead)) entree.opportunites += 1;
+  }
+  const idsComptes = new Set<string>();
+  for (const lead of activations) {
+    const date = lead.dateActivation;
+    if (idsComptes.has(lead.id) || !estOpportuniteInbound(lead) || !date || !estDateSimpleValide(date)) continue;
+    if (date < periode.debut || date > periode.fin) continue;
+    const entree = parSemaine.get(debutSemaine(date));
+    if (!entree) continue;
+    entree.opportunites += 1;
+    idsComptes.add(lead.id);
   }
 
   let cumul = 0;
@@ -247,14 +278,21 @@ function comparer(actuel: number, precedent: number): number | null {
 export function construireStats(params: {
   leads: Lead[];
   leadsPeriodePrecedente: Lead[];
+  leadsActivations?: Lead[];
+  leadsActivationsPeriodePrecedente?: Lead[];
   objectif: Objectif;
   maintenant?: Date;
 }): Stats {
   const { leads, leadsPeriodePrecedente, objectif } = params;
   const maintenant = params.maintenant ?? new Date();
   const periode = construirePeriode(objectif.periode);
-  const kpis = calculerKpis(leads);
-  const kpisPrecedents = calculerKpis(leadsPeriodePrecedente);
+  const activations = params.leadsActivations ?? leads;
+  const kpis = calculerKpis(leads, activations, periode);
+  const kpisPrecedents = calculerKpis(
+    leadsPeriodePrecedente,
+    params.leadsActivationsPeriodePrecedente ?? leadsPeriodePrecedente,
+    construirePeriode(periodePrecedente(periode.id)),
+  );
   const avancement = avancementPeriode(periode.id, maintenant);
   const restants = joursRestants(periode.id, maintenant);
 
@@ -268,7 +306,7 @@ export function construireStats(params: {
       avancement,
     }),
     kpis,
-    serie: construireSerie(leads, periode, objectif.ciblePoints),
+    serie: construireSerie(leads, activations, periode, objectif.ciblePoints),
     parSegment: regrouper<Segment>(leads, (l) => l.segment, LABELS_SEGMENT, {
       toutesLesCles: ['b2b', 'collectivite', 'b2c'],
     }),

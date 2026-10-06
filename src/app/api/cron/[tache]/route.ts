@@ -11,10 +11,10 @@
  */
 import { NextResponse } from 'next/server';
 import { synchroniser } from '@/lib/notion/sync';
-import { listerTousLeads } from '@/lib/db/leads';
+import { listerTousLeads, retraiterAutomatisationHistorique } from '@/lib/db/leads';
 import { lireObjectif, lireReglages } from '@/lib/db/settings';
 import { calculerKpis } from '@/lib/analytics';
-import { avancementPeriode, joursRestants, periodeDepuisDate } from '@/lib/domain/periods';
+import { avancementPeriode, construirePeriode, joursRestants, periodeDepuisDate } from '@/lib/domain/periods';
 import { synthetiserObjectif } from '@/lib/domain/objectives';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +27,7 @@ type Tache = () => Promise<Record<string, unknown>>;
  * l'intégration réellement automatique : sans elle, il faut cliquer.
  */
 const synchroniserNotion: Tache = async () => {
+  const maintenance = await retraiterAutomatisationHistorique();
   const resultat = await synchroniser();
   return {
     succes: resultat.succes,
@@ -35,6 +36,7 @@ const synchroniserNotion: Tache = async () => {
     ignores: resultat.ignores,
     erreurs: resultat.erreurs,
     dureeMs: resultat.dureeMs,
+    maintenance,
   };
 };
 
@@ -48,11 +50,12 @@ const synchroniserNotion: Tache = async () => {
 const resumePeriode: Tache = async () => {
   const reglages = await lireReglages();
   const periode = reglages.periodeActive;
-  const [leads, objectif] = await Promise.all([
-    listerTousLeads({ periode }),
+  const [leads, activations, objectif] = await Promise.all([
+    listerTousLeads({ periode }, { inclureDetails: false }),
+    listerTousLeads({ periodeActivation: periode }, { inclureDetails: false }),
     lireObjectif(periode),
   ]);
-  const kpis = calculerKpis(leads);
+  const kpis = calculerKpis(leads, activations, construirePeriode(periode));
   const synthese = synthetiserObjectif({
     objectif,
     points: kpis.points,
@@ -67,6 +70,8 @@ const resumePeriode: Tache = async () => {
     opportunites: kpis.opportunites,
     cibleActivation: objectif.cibleActivation,
     leadsAVerifier: kpis.leadsAVerifier,
+    primeAcquise: synthese.primeTotale,
+    // Alias conservé pour les scénarios Make existants.
     primeProjetee: synthese.primeTotale,
     projectionPoints: synthese.projectionPoints,
     periodeCourante: periodeDepuisDate(new Date()),
@@ -76,6 +81,7 @@ const resumePeriode: Tache = async () => {
 const TACHES: Record<string, Tache> = {
   'notion-sync': synchroniserNotion,
   'resume-periode': resumePeriode,
+  'leads-maintenance': async () => ({ succes: true, ...await retraiterAutomatisationHistorique() }),
 };
 
 type Contexte = { params: Promise<{ tache: string }> };

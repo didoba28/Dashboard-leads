@@ -1,21 +1,7 @@
 /** Utilitaires partagés par les routes d'API : réponses, erreurs, filtres. */
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
-import type { FiltresLeads } from '@/lib/db/leads';
-import {
-  INITIATIVES,
-  RELATIONS,
-  SEGMENTS,
-  SOURCES_COLLECTE,
-  STATUTS,
-  type Initiative,
-  type Relation,
-  type Segment,
-  type SourceCollecte,
-  type Statut,
-  type TypeDemande,
-  TYPES_DEMANDE,
-} from '@/lib/domain/taxonomy';
+import { schemaFiltresLeads, type FiltresLeads } from '@/lib/db/leads';
 
 export function ok<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
@@ -41,48 +27,45 @@ export function gererErreur(err: unknown) {
   return erreur(message, 500);
 }
 
-function listeDepuis<T extends string>(
-  params: URLSearchParams,
-  cle: string,
-  valides: readonly T[],
-): T[] | undefined {
+function listeDepuis(params: URLSearchParams, cle: string): string[] | undefined {
   const brut = params.getAll(cle).flatMap((v) => v.split(',')).map((v) => v.trim()).filter(Boolean);
-  if (brut.length === 0) return undefined;
-  const filtres = brut.filter((v): v is T => (valides as readonly string[]).includes(v));
-  return filtres.length > 0 ? filtres : undefined;
+  return brut.length ? [...new Set(brut)] : undefined;
 }
 
-function booleenDepuis(params: URLSearchParams, cle: string): boolean | undefined {
+function booleenDepuis(params: URLSearchParams, cle: string): boolean | string | undefined {
   const v = params.get(cle);
   if (v === null || v === '') return undefined;
-  return v === 'true' || v === '1';
+  if (v === 'true' || v === '1') return true;
+  if (v === 'false' || v === '0') return false;
+  // Le schéma renvoie une erreur avec le nom du champ au lieu d'élargir le filtre.
+  return v;
 }
-
-const TRIS_VALIDES = ['date_desc', 'date_asc', 'points_desc', 'maj_desc'] as const;
 
 /** Construit les filtres de liste de leads à partir de la query string. */
 export function filtresDepuisUrl(url: URL): FiltresLeads {
   const p = url.searchParams;
-  const tri = p.get('tri');
-  return {
-    periode: p.get('periode') ?? undefined,
-    dateDebut: p.get('dateDebut') ?? undefined,
-    dateFin: p.get('dateFin') ?? undefined,
-    segment: listeDepuis<Segment>(p, 'segment', SEGMENTS),
-    relation: listeDepuis<Relation>(p, 'relation', RELATIONS),
-    typeDemande: listeDepuis<TypeDemande>(p, 'typeDemande', TYPES_DEMANDE),
-    initiative: listeDepuis<Initiative>(p, 'initiative', INITIATIVES),
-    sourceCollecte: listeDepuis<SourceCollecte>(p, 'sourceCollecte', SOURCES_COLLECTE),
-    statut: listeDepuis<Statut>(p, 'statut', STATUTS),
+  return schemaFiltresLeads.parse({
+    periode: p.get('periode') === 'toutes' ? undefined : p.get('periode') || undefined,
+    periodeActivation: p.get('periodeActivation') || undefined,
+    dateDebut: p.get('dateDebut') || undefined,
+    dateFin: p.get('dateFin') || undefined,
+    segment: listeDepuis(p, 'segment'),
+    relation: listeDepuis(p, 'relation'),
+    typeDemande: listeDepuis(p, 'typeDemande'),
+    initiative: listeDepuis(p, 'initiative'),
+    sourceCollecte: listeDepuis(p, 'sourceCollecte'),
+    statut: listeDepuis(p, 'statut'),
     eligible: booleenDepuis(p, 'eligible'),
     aVerifier: booleenDepuis(p, 'aVerifier'),
     pointsConfirmes: booleenDepuis(p, 'pointsConfirmes'),
+    pointsExclus: booleenDepuis(p, 'pointsExclus'),
+    opportunitesInbound: booleenDepuis(p, 'opportunitesInbound'),
     proprietaire: p.get('proprietaire') ?? undefined,
     q: p.get('q') ?? undefined,
-    tri: TRIS_VALIDES.includes(tri as never) ? (tri as FiltresLeads['tri']) : undefined,
+    tri: p.get('tri') || undefined,
     limite: p.get('limite') ? Number(p.get('limite')) : undefined,
     offset: p.get('offset') ? Number(p.get('offset')) : undefined,
-  };
+  });
 }
 
 /**

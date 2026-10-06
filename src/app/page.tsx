@@ -1,6 +1,6 @@
 /** Vue d'ensemble : où en est le trimestre, et ce qu'il reste à faire. */
 import { construireStats, periodePrecedente } from '@/lib/analytics';
-import { listerLeads, listerTousLeads } from '@/lib/db/leads';
+import { listerTousLeads } from '@/lib/db/leads';
 import { lireObjectif, lireReglages } from '@/lib/db/settings';
 import { estIdPeriodeValide, periodesAutour } from '@/lib/domain/periods';
 import { BarresRepartition, Entonnoir, GraphiqueHebdo, GraphiqueTrajectoire } from '@/components/charts';
@@ -8,6 +8,10 @@ import { formaterDate, formaterEuros, formaterPoints } from '@/lib/format';
 import { EchellePaliers, FrisePaliers, JaugeObjectif, TuileStat } from '@/components/indicateurs';
 import { SelecteurPeriode } from '@/components/selecteur-periode';
 import { Badge, Carte, EnteteCarte } from '@/components/ui/primitives';
+import { ActiviteMensuelleEtRecente, LienIndicateur, PrioritesEtQualite, SynthesePilotage } from '@/components/pilotage/cockpit';
+import { construirePilotage, lienLeads } from '@/lib/domain/pilotage';
+import { pointsDuLead } from '@/lib/domain/lead';
+import { INITIATIVES, INITIATIVES_OUTBOUND } from '@/lib/domain/taxonomy';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -22,51 +26,38 @@ export default async function PageAccueil({
   const demande = typeof params['periode'] === 'string' ? params['periode'] : null;
   const periode = demande && estIdPeriodeValide(demande) ? demande : reglages.periodeActive;
 
-  const [leads, leadsPeriodePrecedente, objectifPeriode, attenteConfirmation] = await Promise.all([
-    listerTousLeads({ periode }),
-    listerTousLeads({ periode: periodePrecedente(periode) }),
+  const [leads, leadsPeriodePrecedente, objectifPeriode, leadsActivations, leadsActivationsPeriodePrecedente] = await Promise.all([
+    listerTousLeads({ periode }, { inclureDetails: false }),
+    listerTousLeads({ periode: periodePrecedente(periode) }, { inclureDetails: false }),
     lireObjectif(periode),
-    listerLeads({ pointsConfirmes: false, limite: 1 }),
+    listerTousLeads({ periodeActivation: periode }, { inclureDetails: false }),
+    listerTousLeads({ periodeActivation: periodePrecedente(periode) }, { inclureDetails: false }),
   ]);
 
-  const stats = construireStats({ leads, leadsPeriodePrecedente, objectif: objectifPeriode });
+  const stats = construireStats({ leads, leadsPeriodePrecedente, objectif: objectifPeriode, leadsActivations, leadsActivationsPeriodePrecedente });
+  const pilotage = construirePilotage({ leads, periode });
 
   const { kpis, synthese, objectif } = stats;
-  const parStatut = new Map(stats.parStatut.map((s) => [s.cle, s.leads]));
-  const qualifies =
-    (parStatut.get('qualifie') ?? 0) + (parStatut.get('active') ?? 0) + (parStatut.get('reactive') ?? 0);
+  const qualifies = leads.filter((lead) => pointsDuLead(lead) > 0 && ['qualifie', 'active', 'reactive'].includes(lead.statut)).length;
 
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight text-ink">Vue d’ensemble</h1>
+          <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.12em] text-ink-muted">Pilotage Growth</p>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Vue d’ensemble</h1>
           <p className="mt-0.5 text-xs text-ink-muted">
             {stats.periode.label} · du {formaterDate(stats.periode.debut)} au {formaterDate(stats.periode.fin)} ·{' '}
-            {stats.joursRestants > 0 ? `${stats.joursRestants} jours restants` : 'période terminée'}
+            {stats.avancement <= 0 ? 'période à venir' : stats.joursRestants > 0 ? `${stats.joursRestants} jours restants` : 'période terminée'}
           </p>
         </div>
-        <SelecteurPeriode
-          periodes={periodesAutour(periode, 5, 2).map((p) => ({ id: p.id, label: p.label }))}
-          actuelle={periode}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <Link href={lienLeads(periode)} className="inline-flex h-9 items-center rounded-lg border border-hair-fort bg-surface px-3.5 text-[13px] font-medium text-ink hover:bg-surface-2">Explorer les leads →</Link>
+          <SelecteurPeriode periodes={periodesAutour(periode, 5, 2).map((p) => ({ id: p.id, label: p.label }))} actuelle={periode} />
+        </div>
       </header>
 
-      {attenteConfirmation.total > 0 ? (
-        <Carte className="flex flex-wrap items-center justify-between gap-3 border-[var(--warning)] px-5 py-4">
-          <div>
-            <p className="text-sm font-semibold text-ink">
-              {attenteConfirmation.total} lead{attenteConfirmation.total > 1 ? 's' : ''} à confirmer
-            </p>
-            <p className="mt-0.5 text-xs text-ink-muted">
-              Consultez les détails reçus et validez les points proposés avant leur prise en compte.
-            </p>
-          </div>
-          <Link href="/leads?periode=toutes&aConfirmer=true" className="text-sm font-medium text-[var(--s1)] underline underline-offset-2">
-            Examiner les leads
-          </Link>
-        </Carte>
-      ) : null}
+      <SynthesePilotage pilotage={pilotage} periode={periode} deltaLeads={stats.comparaison.deltaLeads} deltaPoints={stats.comparaison.deltaPoints} />
 
       {kpis.leadsTotal === 0 ? (
         <Carte className="px-5 py-8 text-center">
@@ -91,6 +82,8 @@ export default async function PageAccueil({
           </div>
         </Carte>
       ) : null}
+
+      <PrioritesEtQualite pilotage={pilotage} periode={periode} />
 
       {/* Deux dispositifs de prime, deux jauges. */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -158,7 +151,7 @@ export default async function PageAccueil({
       <Carte className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-            Prime totale projetée sur {stats.periode.label}
+            Prime acquise selon les résultats validés · {stats.periode.label}
           </p>
           <p className="mt-1 text-2xl font-semibold tracking-tight text-ink">
             {formaterEuros(synthese.primeTotale)}
@@ -176,70 +169,37 @@ export default async function PageAccueil({
       </Carte>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <TuileStat
-          libelle="Leads reçus"
-          valeur={kpis.leadsTotal}
-          delta={stats.comparaison.deltaLeads}
-          aide={`vs ${stats.comparaison.leads} au trimestre précédent`}
-        />
-        <Link
-          href={`/leads?periode=${encodeURIComponent(periode)}&valides=true`}
-          aria-label={`Voir les leads déjà validés sur ${stats.periode.label}`}
-          className="group block rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--s1)] [&>div]:h-full [&>div]:transition-colors hover:[&>div]:border-[var(--s1)]"
-        >
+        <LienIndicateur href={lienLeads(periode, { initiative: INITIATIVES.filter((initiative) => !INITIATIVES_OUTBOUND.includes(initiative)).join(','), pointsConfirmes: true })} label="Consulter les décisions confirmées pour les initiatives inbound">
+          <TuileStat libelle="Points inbound" valeur={kpis.pointsInbound} unite="pts" aide="site, newsletter, salons… · voir →" />
+        </LienIndicateur>
+        <LienIndicateur href={lienLeads(periode, { initiative: INITIATIVES_OUTBOUND.join(','), pointsConfirmes: true })} label="Consulter les décisions confirmées pour les initiatives outbound">
+          <TuileStat libelle="Points outbound" valeur={kpis.pointsOutbound} unite="pts" aide="campagne ou BDR · voir →" />
+        </LienIndicateur>
+        <LienIndicateur href={lienLeads('toutes', { periodeActivation: periode, opportunitesInbound: true })} label="Consulter les opportunités activées ou réactivées pendant la période">
+          <TuileStat libelle="Activations / réactivations" valeur={`${kpis.activations} / ${kpis.reactivations}`} delta={stats.comparaison.deltaOpportunites} aide="Par date d’activation · voir →" />
+        </LienIndicateur>
+        <LienIndicateur href={lienLeads(periode, { aVerifier: true })} label="Vérifier les classifications incertaines de la période">
           <TuileStat
-            libelle="Points validés"
-            valeur={kpis.points}
-            unite="pts"
-            delta={stats.comparaison.deltaPoints}
-            aide="Voir les leads validés →"
-            accent
+            libelle="À vérifier"
+            valeur={kpis.leadsAVerifier}
+            aide="classification incertaine · examiner →"
+            badge={
+              kpis.leadsAVerifier > 0 ? (
+                <Badge ton="attention" icone={<span aria-hidden>!</span>}>
+                  action
+                </Badge>
+              ) : undefined
+            }
           />
-        </Link>
-        <TuileStat
-          libelle="Leads exclus"
-          valeur={kpis.leadsExclus}
-          aide="clients, distributeurs, renouvellements"
-        />
-        <TuileStat
-          libelle="Taux d’activation"
-          valeur={kpis.tauxActivation}
-          unite="%"
-          aide={`${kpis.opportunites} opp. sur ${kpis.leadsEligibles} leads comptabilisés`}
-        />
+        </LienIndicateur>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <TuileStat
-          libelle="Points inbound"
-          valeur={kpis.pointsInbound}
-          unite="pts"
-          aide="site, newsletter, salons…"
-        />
-        <TuileStat
-          libelle="Points outbound"
-          valeur={kpis.pointsOutbound}
-          unite="pts"
-          aide="lead magnets servis en campagne ou par un BDR (0,5)"
-        />
-        <TuileStat
-          libelle="Activations / réactivations"
-          valeur={`${kpis.activations} / ${kpis.reactivations}`}
-          delta={stats.comparaison.deltaOpportunites}
-        />
-        <TuileStat
-          libelle="À vérifier"
-          valeur={kpis.leadsAVerifier}
-          aide="classification automatique incertaine"
-          badge={
-            kpis.leadsAVerifier > 0 ? (
-              <Badge ton="attention" icone={<span aria-hidden>!</span>}>
-                action
-              </Badge>
-            ) : undefined
-          }
-        />
-      </div>
+      <Carte className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+        <div><p className="text-xs font-semibold text-ink">Activation des leads reçus</p><p className="mt-1 text-[11px] text-ink-muted">{kpis.opportunitesCohorte} opportunités sur {kpis.leadsEligibles} leads comptabilisés reçus sur la période.</p></div>
+        <p className="text-2xl font-semibold text-ink tabulaire">{formaterPoints(kpis.tauxActivation)} <span className="text-sm font-normal text-ink-muted">%</span></p>
+      </Carte>
+
+      <ActiviteMensuelleEtRecente pilotage={pilotage} periode={periode} />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <GraphiqueTrajectoire serie={stats.serie} ciblePoints={objectif.ciblePoints} />
@@ -267,8 +227,8 @@ export default async function PageAccueil({
           etapes={[
             { label: 'Leads reçus', valeur: kpis.leadsTotal },
             { label: 'Leads comptabilisés', valeur: kpis.leadsEligibles, aide: 'hors clients, distributeurs et renouvellements' },
-            { label: 'Qualifiés ou plus', valeur: qualifies },
-            { label: 'Opportunités inbound', valeur: kpis.opportunites },
+            { label: 'Comptabilisés puis qualifiés', valeur: qualifies },
+            { label: 'Opportunités de la cohorte', valeur: kpis.opportunitesCohorte },
           ]}
         />
         <BarresRepartition

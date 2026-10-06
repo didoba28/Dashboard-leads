@@ -336,7 +336,7 @@ export interface LeadDepuisNotion {
 export function depuisPageNotion(page: {
   properties: Record<string, unknown>;
   last_edited_time?: string;
-}): LeadDepuisNotion {
+}, options: { preserverChampsAbsents?: boolean } = {}): LeadDepuisNotion {
   const props = page.properties as Record<string, ValeurNotion>;
   const patch: Partial<LeadParsed> = {
     nom: lireTexte(props[P.nom]),
@@ -365,7 +365,9 @@ export function depuisPageNotion(page: {
   patch.typeActivation = typeActivationBrut
     ? resoudre<TypeActivation>(typeActivationBrut, INV_ACTIVATION, 'activation')
     : null;
-  patch.dateActivation = lireDate(props[P.dateActivation]);
+  // Une colonne absente/vide ne prouve pas une nouvelle date d'activation.
+  // En mise à jour, undefined conserve la date historique du dashboard.
+  patch.dateActivation = lireDate(props[P.dateActivation]) ?? undefined;
 
   // La vue métier historique peut cohabiter avec les colonnes techniques du
   // dashboard. Quand ses champs sont présents, ils priment pour la lecture.
@@ -389,9 +391,8 @@ export function depuisPageNotion(page: {
     const reactivation = typeActivationSuivi === 'Réactivation';
     patch.typeActivation = reactivation ? 'reactivation' : 'activation';
     patch.statut = reactivation ? 'reactive' : 'active';
-    patch.dateActivation =
-      lireDate(props[P.dateActivation]) ?? page.last_edited_time?.slice(0, 10) ?? patch.dateReception ?? null;
-    patch.aVerifier = false;
+    patch.dateActivation = lireDate(props[P.dateActivation]) ?? undefined;
+    patch.aVerifier = !patch.dateActivation;
     if (typeActivationSuivi === "Création d'orga") {
       patch.tags = [...new Set([...(patch.tags ?? []), "Création d'orga"])];
     }
@@ -402,5 +403,30 @@ export function depuisPageNotion(page: {
     patch.pointsOverride = null;
   }
 
+  if (options.preserverChampsAbsents) {
+    // Le tableau historique n'a pas nécessairement les colonnes techniques.
+    // Une colonne inexistante n'est pas une demande de vider le contact ou de
+    // remettre sa qualification à une valeur par défaut.
+    const correspondances: Partial<Record<keyof LeadParsed, string[]>> = {
+      nom: [P.nom], dateReception: [P.dateReception], email: [P.email], telephone: [P.telephone],
+      societe: [P.societe], fonction: [P.fonction], ville: [P.ville],
+      segment: [P.segment, P_SUIVI.secteur], relation: [P.relation],
+      typeDemande: [P.typeDemande, P_SUIVI.canal], initiative: [P.initiative, P_SUIVI.initiative],
+      sourceCollecte: [P.sourceCollecte], campagne: [P.campagne], leadMagnet: [P.leadMagnet, P_SUIVI.sourceProspect],
+      message: [P.message], statut: [P.statut], proprietaire: [P.proprietaire, P_SUIVI.salesResponsable],
+      tags: [P.tags], pointsOverride: [P.pointsOverride], aVerifier: [P.aVerifier],
+      typeActivation: [P.typeActivation], dateActivation: [P.dateActivation],
+    };
+    const titrePresent = Object.values(props).some((propriete) => propriete?.type === 'title');
+    for (const [champ, colonnes] of Object.entries(correspondances)) {
+      if (colonnes.some((colonne) => Object.hasOwn(props, colonne))) continue;
+      if (champ === 'nom' && titrePresent) continue;
+      if (opportuniteLiee || typeActivationSuivi) {
+        if (champ === 'statut' || champ === 'typeActivation' || champ === 'aVerifier') continue;
+        if (champ === 'tags' && typeActivationSuivi === "Création d'orga") continue;
+      }
+      delete patch[champ as keyof LeadParsed];
+    }
+  }
   return { patch, idDashboard: lireTexte(props[P.idDashboard]) };
 }

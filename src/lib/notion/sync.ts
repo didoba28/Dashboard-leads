@@ -23,7 +23,7 @@ import {
 } from '@/lib/db/leads';
 import { ecrireReglages, lireReglages } from '@/lib/db/settings';
 import { getDb, maintenantIso, nouvelId } from '@/lib/db';
-import { schemaLeadInput } from '@/lib/domain/lead';
+import { estDateSimpleValide, schemaLeadInput } from '@/lib/domain/lead';
 
 export interface ResultatSync {
   succes: boolean;
@@ -162,6 +162,17 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
       if (!isFullPage(page)) continue;
       try {
         const { patch, idDashboard } = depuisPageNotion(page);
+        // Une suppression locale est une décision durable. Le prochain pull
+        // ne doit pas recréer le même lead à partir de sa page Notion.
+        const db = await getDb();
+        const archive = await db.get<{ id: string }>(
+          'SELECT id FROM leads WHERE deleted_at IS NOT NULL AND (notion_page_id = ? OR id = ?) LIMIT 1',
+          [page.id, idDashboard ?? null],
+        );
+        if (archive) {
+          resultat.ignores++;
+          continue;
+        }
         const existant =
           (await lireLeadParNotionPageId(page.id)) ?? (idDashboard ? await lireLead(idDashboard) : null);
 
@@ -192,7 +203,18 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
           continue;
         }
 
-        const parsed = schemaLeadInput.partial().parse(patch);
+        const patchMaj = depuisPageNotion(page, { preserverChampsAbsents: true }).patch;
+        if (patchMaj.tags && !Object.hasOwn(page.properties, P.tags)) {
+          // Le signal dérivé du pipeline complète les tags locaux : une colonne
+          // absente ne doit pas remplacer toutes les annotations du lead.
+          patchMaj.tags = [...new Set([...existant.tags, ...patchMaj.tags])];
+        }
+        if (!patchMaj.dateActivation && existant.dateActivation && estDateSimpleValide(existant.dateActivation) &&
+          (patchMaj.statut === 'active' || patchMaj.statut === 'reactive')) {
+          // Une absence côté Notion ne remet pas en cause une date locale fiable.
+          patchMaj.aVerifier = existant.aVerifier;
+        }
+        const parsed = schemaLeadInput.partial().parse(patchMaj);
         await mettreAJourLead(existant.id, parsed);
         await marquerSynchronise(existant.id, page.id, page.last_edited_time);
         resultat.maj++;
@@ -200,12 +222,14 @@ export async function pullDepuisNotion(): Promise<ResultatSync> {
         resultat.erreurs.push(`Page ${page.id} : ${messageErreur(err)}`);
       }
     }
-    await ecrireReglages({ notionDernierPull: lanceLe });
+    // Un curseur ne dépasse jamais une page échouée : elle sera retentée.
+    if (resultat.erreurs.length === 0) await ecrireReglages({ notionDernierPull: lanceLe });
   } catch (err) {
     resultat.succes = false;
     resultat.erreurs.push(messageErreur(err));
   }
 
+  resultat.succes = resultat.erreurs.length === 0;
   resultat.dureeMs = Date.now() - debut;
   await journaliser(resultat);
   return resultat;
@@ -250,6 +274,7 @@ export async function pushVersNotion(options: { forcer?: boolean } = {}): Promis
     resultat.erreurs.push(messageErreur(err));
   }
 
+  resultat.succes = resultat.erreurs.length === 0;
   resultat.dureeMs = Date.now() - debut;
   await journaliser(resultat);
   return resultat;
@@ -259,6 +284,11 @@ export async function pushVersNotion(options: { forcer?: boolean } = {}): Promis
 export async function synchroniser(): Promise<ResultatSync> {
   const debut = Date.now();
   const pull = await pullDepuisNotion();
+  if (!pull.succes) {
+    // Ne jamais écraser une page Notion plus récente que nous n'avons pas pu
+    // lire. Le prochain cycle retentera le pull avant tout envoi.
+    return { ...pull, direction: 'bidirectionnel', dureeMs: Date.now() - debut };
+  }
   const push = await pushVersNotion();
   return {
     succes: pull.succes && push.succes,
