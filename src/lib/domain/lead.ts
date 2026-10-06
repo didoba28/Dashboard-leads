@@ -167,6 +167,10 @@ export function pointsDuLead(lead: Lead): number {
  * Clé de déduplication : même personne, indépendamment de l'origine.
  * La fenêtre de dates est appliquée par le dépôt de données. Ainsi, un même
  * e-mail capté par Slack puis par Gmail le même jour ne crée qu'un lead.
+ * La ressource demandée ne fait volontairement PAS partie de la clé. En
+ * production, un même visiteur remplit couramment le formulaire de contact
+ * puis le simulateur à une minute d'intervalle : deux notifications, mais une
+ * seule demande entrante. L'inclure dans la clé laissait passer ces doublons.
  */
 export function calculerDedupeKey(input: {
   nom?: string | null;

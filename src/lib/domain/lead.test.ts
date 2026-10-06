@@ -97,6 +97,26 @@ describe('calculerDedupeKey', () => {
     expect(a).toBe(b);
   });
 
+  it('regroupe le formulaire de contact et le simulateur du même jour', () => {
+    // Cas réel : un visiteur remplit le contact puis le simulateur dans la
+    // foulée. Deux notifications Slack, mais une seule demande entrante.
+    const contact = calculerDedupeKey({
+      email: 'a@b.fr', typeDemande: 'formulaire_contact',
+      leadMagnet: 'Formulaire contact', dateReception: '2026-10-05',
+    });
+    const simulateur = calculerDedupeKey({
+      email: 'a@b.fr', typeDemande: 'simulateur',
+      leadMagnet: 'Projet compatible identifié', dateReception: '2026-10-05',
+    });
+    expect(contact).toBe(simulateur);
+  });
+
+  it('conserve la même identité entre deux journées et délègue la fenêtre au dépôt', () => {
+    const a = calculerDedupeKey({ email: 'a@b.fr', typeDemande: 'catalogue', dateReception: '2026-10-05' });
+    const b = calculerDedupeKey({ email: 'a@b.fr', typeDemande: 'catalogue', dateReception: '2026-10-06' });
+    expect(a).toBe(b);
+  });
+
   it('retombe sur le téléphone puis le couple nom et ville', () => {
     expect(calculerDedupeKey({ telephone: '06 12 34 56 78', typeDemande: 'appel_entrant', dateReception: '2026-10-05' })).toBe(
       '0612345678',

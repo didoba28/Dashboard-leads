@@ -8,7 +8,75 @@ import { aujourdHui, type LeadInput } from '@/lib/domain/lead';
 import { extraireDetailsFormulaireEmail } from './email-details';
 
 /** Schéma d'un e-mail entrant (webhook de service de mail entrant type SendGrid/Mailgun). */
-const schemaEmailBrut = z
+/**
+ * Alias acceptés pour chaque champ.
+ *
+ * Les plateformes d'automatisation nomment les sorties d'un module e-mail
+ * comme elles l'entendent (`subject`, `text`, `html`, `from`…), et ces noms
+ * changent d'un connecteur à l'autre. Refuser tout ce qui n'est pas en
+ * français obligerait à renommer dans chaque scénario, et un simple écart de
+ * nom renverrait un 422 difficile à diagnostiquer depuis Make. On accepte donc
+ * les variantes usuelles en entrée, et on normalise ici une bonne fois.
+ */
+const ALIAS: Record<string, string[]> = {
+  sujet: ['subject', 'objet', 'titre'],
+  expediteur: ['from', 'sender', 'fromEmail', 'from_email', 'expediteurEmail'],
+  destinataire: ['to', 'recipient', 'toEmail'],
+  corpsTexte: ['text', 'body', 'textPlain', 'plainText', 'fullTextBody', 'textBody', 'corps'],
+  corpsHtml: ['html', 'htmlBody', 'bodyHtml'],
+  url: ['link', 'pageUrl', 'sourceUrl'],
+  recuLe: ['receivedAt', 'date', 'internalDate', 'receivedDate', 'sentAt'],
+  messageId: ['id', 'message_id', 'gmailId'],
+};
+
+/** Récupère une valeur de champ, quel que soit l'alias employé. */
+function premiereValeur(brut: Record<string, unknown>, canonique: string): string | undefined {
+  for (const cle of [canonique, ...(ALIAS[canonique] ?? [])]) {
+    const v = brut[cle];
+    if (typeof v === 'string' && v.trim() !== '') return v;
+    if (typeof v === 'number') return String(v);
+  }
+  return undefined;
+}
+
+/**
+ * Reconstitue un expéditeur lisible. Un module e-mail renvoie souvent le nom
+ * et l'adresse séparément, ou une collection `{ name, address }` : le
+ * classifieur, lui, attend la forme `Nom <adresse>`.
+ */
+function reconstruireExpediteur(brut: Record<string, unknown>): string | undefined {
+  const direct = premiereValeur(brut, 'expediteur');
+  const objet = brut['from'];
+  if (objet && typeof objet === 'object' && !Array.isArray(objet)) {
+    const o = objet as Record<string, unknown>;
+    const adresse = [o['address'], o['email'], o['value']].find((v) => typeof v === 'string') as string | undefined;
+    const nom = [o['name'], o['displayName']].find((v) => typeof v === 'string') as string | undefined;
+    if (adresse) return nom ? `${nom} <${adresse}>` : adresse;
+  }
+  const nom = [brut['fromName'], brut['from_name'], brut['senderName']].find(
+    (v) => typeof v === 'string' && v.trim() !== '',
+  ) as string | undefined;
+  if (direct && nom && !direct.includes('<')) return `${nom} <${direct}>`;
+  return direct ?? nom;
+}
+
+/** Normalise une charge utile quelconque vers les noms de champs canoniques. */
+function normaliserEntree(valeur: unknown): unknown {
+  if (!valeur || typeof valeur !== 'object' || Array.isArray(valeur)) return valeur;
+  const brut = valeur as Record<string, unknown>;
+  const sortie: Record<string, unknown> = { ...brut };
+  for (const canonique of Object.keys(ALIAS)) {
+    if (canonique === 'expediteur') continue;
+    const v = premiereValeur(brut, canonique);
+    if (v !== undefined) sortie[canonique] = v;
+  }
+  const expediteur = reconstruireExpediteur(brut);
+  if (expediteur !== undefined) sortie['expediteur'] = expediteur;
+  return sortie;
+}
+
+export const schemaEmailEntrant = z
+  .preprocess(normaliserEntree, z
   .object({
     sujet: z.string().trim().nullable().optional(),
     expediteur: z.string().trim().nullable().optional(),
@@ -18,50 +86,16 @@ const schemaEmailBrut = z
     url: z.string().trim().nullable().optional(),
     recuLe: z.string().trim().nullable().optional(),
     messageId: z.string().trim().nullable().optional(),
-    // Alias envoyés par Gmail / Make.
-    subject: z.string().trim().nullable().optional(),
-    fromEmail: z.string().trim().nullable().optional(),
-    fromName: z.string().trim().nullable().optional(),
-    to: z.string().trim().nullable().optional(),
-    body: z.string().nullable().optional(),
-    text: z.string().nullable().optional(),
-    fullTextBody: z.string().nullable().optional(),
-    html: z.string().nullable().optional(),
-    htmlBody: z.string().nullable().optional(),
-    receivedAt: z.string().trim().nullable().optional(),
-    internalDate: z.string().trim().nullable().optional(),
-    id: z.string().trim().nullable().optional(),
   })
-  .passthrough();
-
-function premierTexte(...valeurs: Array<string | null | undefined>): string | null {
-  return valeurs.find((valeur) => Boolean(valeur?.trim()))?.trim() ?? null;
-}
-
-export const schemaEmailEntrant = schemaEmailBrut
-  .transform((v) => {
-    const emailExpediteur = premierTexte(v.expediteur, v.fromEmail);
-    const expediteur = v.expediteur
-      ? v.expediteur
-      : v.fromName && emailExpediteur
-        ? `${v.fromName} <${emailExpediteur}>`
-        : premierTexte(v.fromName, emailExpediteur);
-
-    return {
-      ...v,
-      sujet: premierTexte(v.sujet, v.subject),
-      expediteur,
-      destinataire: premierTexte(v.destinataire, v.to),
-      corpsTexte: premierTexte(v.corpsTexte, v.fullTextBody, v.text, v.body),
-      corpsHtml: premierTexte(v.corpsHtml, v.htmlBody, v.html),
-      recuLe: premierTexte(v.recuLe, v.receivedAt, v.internalDate),
-      messageId: premierTexte(v.messageId, v.id),
-    };
-  })
+  .passthrough()
   .refine(
     (v) => Boolean(v.corpsTexte?.trim()) || Boolean(v.corpsHtml?.trim()) || Boolean(v.sujet?.trim()),
-    { message: 'Au moins un des champs sujet, corpsTexte ou corpsHtml doit être renseigné.' },
-  );
+    {
+      message:
+        'Au moins un des champs sujet, corpsTexte ou corpsHtml doit être renseigné ' +
+        '(alias acceptés : subject, text/body, html).',
+    },
+  ));
 
 export type EmailEntrant = z.infer<typeof schemaEmailEntrant>;
 
@@ -95,10 +129,15 @@ function dateDepuisRecuLe(recuLe: string | null | undefined): string {
   if (!recuLe) return aujourdHui();
   const m = /^\d{4}-\d{2}-\d{2}/.exec(recuLe);
   if (m) return m[0];
-  const timestamp = /^\d{10,13}$/.test(recuLe)
-    ? Number(recuLe) * (recuLe.length === 10 ? 1000 : 1)
-    : recuLe;
-  const d = new Date(timestamp);
+  // Gmail et plusieurs connecteurs datent en millisecondes depuis epoch. Sans
+  // ce cas, `new Date("1791205375000")` est invalide et le lead se retrouvait
+  // daté du jour de l'import — donc rattaché au mauvais trimestre.
+  if (/^\d{10,14}$/.test(recuLe.trim())) {
+    const n = Number(recuLe.trim());
+    const d = new Date(recuLe.trim().length <= 10 ? n * 1000 : n);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  const d = new Date(recuLe);
   return Number.isNaN(d.getTime()) ? aujourdHui() : d.toISOString().slice(0, 10);
 }
 
