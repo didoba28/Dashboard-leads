@@ -22,7 +22,8 @@ export default async function PageLeads({
     ? 'toutes'
     : demande === 'toutes' ? 'toutes' : demande && estIdPeriodeValide(demande) ? demande : 'toutes';
   const aVerifier = params['aVerifier'] === 'true';
-  const aConfirmer = params['aConfirmer'] === 'true';
+  const valides = params['valides'] === 'true' || params['pointsConfirmes'] === 'true';
+  const aConfirmer = !valides && params['aConfirmer'] === 'true';
 
   const filtres: FiltresVue = {
     periode,
@@ -35,6 +36,7 @@ export default async function PageLeads({
     initiative: '',
     aVerifier,
     aConfirmer,
+    valides,
     tri: 'date_desc',
   };
 
@@ -48,7 +50,7 @@ export default async function PageLeads({
     dateDebut: dateDebut || undefined,
     dateFin: dateFin || undefined,
     aVerifier: aVerifier ? true : undefined,
-    pointsConfirmes: aConfirmer ? false : undefined,
+    pointsConfirmes: valides ? true : aConfirmer ? false : undefined,
     limite: 50,
   });
 

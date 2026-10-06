@@ -80,6 +80,7 @@ function definirTests(): void {
     expect(confirme?.pointsConfirmesLe).not.toBeNull();
     expect(pointsDuLead(confirme!)).toBe(1);
     expect((await listerLeads({ pointsConfirmes: false })).total).toBe(0);
+    expect((await listerLeads({ pointsConfirmes: true })).leads.map((item) => item.id)).toContain(lead.id);
 
     const modifie = await mettreAJourLead(lead.id, { relation: 'client' });
     expect(modifie?.pointsConfirmes).toBe(false);

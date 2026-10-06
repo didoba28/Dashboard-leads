@@ -182,13 +182,20 @@ export default async function PageAccueil({
           delta={stats.comparaison.deltaLeads}
           aide={`vs ${stats.comparaison.leads} au trimestre précédent`}
         />
-        <TuileStat
-          libelle="Points validés"
-          valeur={kpis.points}
-          unite="pts"
-          delta={stats.comparaison.deltaPoints}
-          accent
-        />
+        <Link
+          href={`/leads?periode=${encodeURIComponent(periode)}&valides=true`}
+          aria-label={`Voir les leads déjà validés sur ${stats.periode.label}`}
+          className="group block rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--s1)] [&>div]:h-full [&>div]:transition-colors hover:[&>div]:border-[var(--s1)]"
+        >
+          <TuileStat
+            libelle="Points validés"
+            valeur={kpis.points}
+            unite="pts"
+            delta={stats.comparaison.deltaPoints}
+            aide="Voir les leads validés →"
+            accent
+          />
+        </Link>
         <TuileStat
           libelle="Leads exclus"
           valeur={kpis.leadsExclus}

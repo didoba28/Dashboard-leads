@@ -36,6 +36,7 @@ export interface FiltresVue {
   initiative: string;
   aVerifier: boolean;
   aConfirmer: boolean;
+  valides: boolean;
   tri: string;
 }
 
@@ -56,7 +57,8 @@ function construireQuery(f: FiltresVue, offset: number): string {
   if (f.typeDemande) p.set('typeDemande', f.typeDemande);
   if (f.initiative) p.set('initiative', f.initiative);
   if (f.aVerifier) p.set('aVerifier', 'true');
-  if (f.aConfirmer) p.set('pointsConfirmes', 'false');
+  if (f.valides) p.set('pointsConfirmes', 'true');
+  else if (f.aConfirmer) p.set('pointsConfirmes', 'false');
   return p.toString();
 }
 
@@ -225,11 +227,21 @@ export function VueLeads({
     }));
   }
 
+  function basculerAConfirmer(actif: boolean) {
+    setOffset(0);
+    setFiltres((f) => ({ ...f, aConfirmer: actif, valides: actif ? false : f.valides }));
+  }
+
+  function basculerValides(actif: boolean) {
+    setOffset(0);
+    setFiltres((f) => ({ ...f, valides: actif, aConfirmer: actif ? false : f.aConfirmer }));
+  }
+
   const nbFiltresActifs = useMemo(
     () =>
       [filtres.q, filtres.segment, filtres.statut, filtres.typeDemande, filtres.initiative].filter(Boolean).length +
       (filtres.dateDebut || filtres.dateFin ? 1 : 0) +
-      (filtres.aVerifier ? 1 : 0) + (filtres.aConfirmer ? 1 : 0),
+      (filtres.aVerifier ? 1 : 0) + (filtres.aConfirmer ? 1 : 0) + (filtres.valides ? 1 : 0),
     [filtres],
   );
 
@@ -247,6 +259,7 @@ export function VueLeads({
       initiative: '',
       aVerifier: false,
       aConfirmer: false,
+      valides: false,
     }));
   }
 
@@ -453,10 +466,18 @@ export function VueLeads({
           <div className="flex items-center gap-1.5">
             <Interrupteur
               actif={filtres.aConfirmer}
-              onChange={(v) => majFiltre('aConfirmer', v)}
+              onChange={basculerAConfirmer}
               label="Afficher seulement les leads dont les points restent à confirmer"
             />
             <span className="text-xs text-ink-2">Points à confirmer</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Interrupteur
+              actif={filtres.valides}
+              onChange={basculerValides}
+              label="Afficher seulement les leads dont les points sont déjà validés"
+            />
+            <span className="text-xs text-ink-2">Déjà validés</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Interrupteur
@@ -565,6 +586,7 @@ export function VueLeads({
                   const points = pointsDuLead(lead);
                   const pointsProposes = pointsProposesDuLead(lead);
                   const enAttente = lead.validationRequise && !lead.pointsConfirmes;
+                  const valideAffiche = filtres.valides && lead.pointsConfirmes;
                   return (
                     <tr
                       key={lead.id}
@@ -606,6 +628,7 @@ export function VueLeads({
                             </p>
                           </div>
                           {enAttente ? <Badge ton="attention">à confirmer</Badge> : null}
+                          {valideAffiche ? <Badge ton="bon">validé</Badge> : null}
                           {lead.aVerifier ? (
                             <Badge ton="attention" icone={<span aria-hidden>!</span>}>
                               à vérifier
