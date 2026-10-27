@@ -20,6 +20,30 @@ function lead(patch: Partial<Lead> = {}): Lead {
 }
 
 describe('indicateurs cohorte et flux d’activation', () => {
+  it('compte une réactivation manuelle datée malgré un ancien statut et une exclusion des nouveaux leads', () => {
+    const reactive = lead({ statut: 'qualifie', relation: 'client', eligible: false, eligibleActivation: false,
+      points: 0, typeActivation: 'reactivation', manualFields: ['typeActivation', 'dateActivation'] });
+    const kpis = calculerKpis([reactive], [reactive], construirePeriode('2026-Q4'));
+    expect(kpis.reactivations).toBe(1);
+    expect(kpis.opportunites).toBe(1);
+    expect(kpis.points).toBe(0);
+    expect(kpis.tauxActivation).toBe(0);
+  });
+
+  it('ne confond pas une proposition automatique avec une décision manuelle', () => {
+    const reactive = lead({ statut: 'nouveau', typeActivation: 'reactivation', eligibleActivation: false });
+    expect(calculerKpis([reactive]).reactivations).toBe(0);
+    expect(calculerKpis([lead({ ...reactive, manualFields: ['typeActivation', 'dateActivation'], pointsConfirmes: false })]).reactivations).toBe(0);
+  });
+
+  it('respecte le type manuel même si le statut dit l’inverse, y compris un effacement explicite', () => {
+    const choisi = lead({ statut: 'reactive', typeActivation: 'activation', manualFields: ['typeActivation', 'dateActivation'] });
+    expect(calculerKpis([choisi]).activations).toBe(1);
+    expect(calculerKpis([choisi]).reactivations).toBe(0);
+    expect(calculerKpis([lead({ ...choisi, typeActivation: null })]).opportunites).toBe(0);
+    expect(calculerKpis([lead({ ...choisi, dateActivation: null })]).opportunites).toBe(0);
+  });
+
   it('rattache les points à la réception et l’opportunité à son activation', () => {
     const ancien = lead();
     const t3 = construireStats({

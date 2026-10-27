@@ -74,6 +74,8 @@ export interface Lead {
   notionPageId: string | null;
   notionLastSyncedAt: string | null;
   rawPayload: unknown;
+  /** Champs saisis dans le dashboard, protégés contre les écritures automatiques. */
+  manualFields?: string[];
 
   createdAt: string;
   updatedAt: string;
@@ -156,6 +158,9 @@ export type LeadPatch = z.input<typeof schemaLeadPatch>;
 
 /** Un lead compte-t-il comme opportunité activée / réactivée par l'inbound ? */
 export function estOpportuniteInbound(lead: Lead): boolean {
+  const decisionManuelle = lead.manualFields?.includes('typeActivation') && lead.manualFields.includes('dateActivation');
+  if (decisionManuelle) return lead.pointsConfirmes && lead.typeActivation != null &&
+    lead.dateActivation != null && estDateSimpleValide(lead.dateActivation);
   return lead.pointsConfirmes && lead.eligible && lead.eligibleActivation && STATUTS_OPPORTUNITE.includes(lead.statut);
 }
 

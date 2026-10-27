@@ -374,7 +374,7 @@ export function FormulaireLead({
                 {optionsDe(STATUTS, LABELS_STATUT)}
               </Selection>
             </Champ>
-            <Champ label="Type d’activation" aide="Renseigner pour une opportunité">
+            <Champ label="Type d’activation" aide="Votre choix daté et confirmé prime sur le statut et l’éligibilité automatiques, sans changer les points de lead entrant.">
               <Selection
                 value={v.typeActivation}
                 onChange={(e) => set('typeActivation', e.target.value as TypeActivation | '')}

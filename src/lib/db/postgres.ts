@@ -143,6 +143,13 @@ const MIGRATIONS_POSTGRES: Migration[] = [
         WHERE dedupe_key IS NOT NULL AND deleted_at IS NULL;
     `,
   },
+  {
+    nom: '005_manual_fields',
+    sql: `ALTER TABLE leads ADD COLUMN IF NOT EXISTS manual_fields TEXT NOT NULL DEFAULT '[]';
+      UPDATE leads SET manual_fields = '["typeActivation","dateActivation","statut","relation"]'
+      WHERE manual_fields = '[]' AND source_collecte <> 'notion'
+        AND type_activation IS NOT NULL AND date_activation IS NOT NULL;`,
+  },
 ];
 
 /** Traduit les marqueurs positionnels `?` (convention commune, voir types.ts) en `$1, $2, …`. */

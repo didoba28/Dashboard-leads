@@ -20,7 +20,7 @@ export async function PATCH(request: Request, { params }: Contexte) {
   try {
     const { id } = await params;
     const patch = schemaLeadPatch.parse(await request.json());
-    const lead = await mettreAJourLead(id, patch);
+    const lead = await mettreAJourLead(id, patch, { manuelle: true });
     return lead ? ok(lead) : erreur('Lead introuvable', 404);
   } catch (err) {
     return gererErreur(err);

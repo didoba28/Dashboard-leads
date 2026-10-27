@@ -197,7 +197,7 @@ export function calculerKpis(
     if (periodeActivation && (date < periodeActivation.debut || date > periodeActivation.fin)) continue;
     idsComptes.add(lead.id);
     kpis.opportunites += 1;
-    if (lead.statut === 'reactive' || lead.typeActivation === 'reactivation') kpis.reactivations += 1;
+    if (lead.typeActivation ? lead.typeActivation === 'reactivation' : lead.statut === 'reactive') kpis.reactivations += 1;
     else kpis.activations += 1;
   }
 

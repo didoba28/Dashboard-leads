@@ -78,6 +78,7 @@ interface LigneLead {
   notion_page_id: string | null;
   notion_last_synced_at: string | null;
   raw_payload: string | null;
+  manual_fields: string;
   created_at: string;
   updated_at: string;
 }
@@ -123,6 +124,7 @@ function versLead(l: LigneLead): Lead {
     notionPageId: l.notion_page_id,
     notionLastSyncedAt: l.notion_last_synced_at,
     rawPayload: l.raw_payload ? parseJson<unknown>(l.raw_payload, null) : null,
+    manualFields: parseJson<string[]>(l.manual_fields, []),
     createdAt: l.created_at,
     updatedAt: l.updated_at,
   };
@@ -142,11 +144,9 @@ function parseJson<T>(brut: string, defaut: T): T {
  */
 async function normaliserSegmentsSlack(db: PiloteDonnees): Promise<void> {
   await db.run(
-    `UPDATE leads
-     SET segment = 'collectivite', updated_at = ?
-     WHERE source_collecte = 'slack_inbound'
-       AND deleted_at IS NULL
-       AND segment <> 'collectivite'`,
+    `UPDATE leads SET segment = 'collectivite', updated_at = ?
+     WHERE source_collecte = 'slack_inbound' AND deleted_at IS NULL AND segment <> 'collectivite'
+       AND manual_fields NOT LIKE '%"segment"%'`,
     [maintenantIso()],
   );
 }
@@ -167,7 +167,8 @@ async function reparerLeadsSlackAnciens(
 
     if (!ligne.nom?.trim() && ligne.message) {
       const identite = extraireIdentiteNotificationSlack(ligne.message);
-      if (identite.nom) {
+      const proteges = parseJson<string[]>(ligne.manual_fields, []);
+      if (identite.nom && !proteges.includes('nom') && !proteges.includes('ville')) {
         const maintenant = maintenantIso();
         const resultat = await db.run(
           `UPDATE leads
@@ -255,7 +256,7 @@ const COLONNES = `id, date_reception, nom, email, telephone, societe, fonction, 
   type_activation, date_activation, proprietaire, tags, eligible, points, eligible_activation,
   regle_id, regle_label, explication, points_override, points_override_raison,
   validation_requise, points_confirmes, points_confirmes_le, points_confirmes_par, a_verifier,
-  confiance, dedupe_key, notion_page_id, notion_last_synced_at, raw_payload, created_at, updated_at`;
+  confiance, dedupe_key, notion_page_id, notion_last_synced_at, raw_payload, manual_fields, created_at, updated_at`;
 
 export interface FiltresLeads {
   periode?: string;
@@ -388,7 +389,11 @@ function construireWhere(f: FiltresLeads): ClauseWhere {
     conditions.push(`coalesce(points_override, CASE WHEN eligible THEN points ELSE 0 END) ${f.pointsExclus ? '<=' : '>'} 0`);
   }
   if (f.opportunitesInbound) {
-    conditions.push(`points_confirmes = ? AND eligible = ? AND eligible_activation = ? AND statut IN (${STATUTS_OPPORTUNITE.map(() => '?').join(', ')})`);
+    conditions.push(`points_confirmes = ? AND (
+      (eligible = ? AND eligible_activation = ? AND statut IN (${STATUTS_OPPORTUNITE.map(() => '?').join(', ')})
+       AND NOT (manual_fields LIKE '%"typeActivation"%' AND manual_fields LIKE '%"dateActivation"%')) OR
+      (manual_fields LIKE '%"typeActivation"%' AND manual_fields LIKE '%"dateActivation"%'
+       AND type_activation IN ('activation', 'reactivation') AND date_activation IS NOT NULL))`);
     params.push(1, 1, 1, ...STATUTS_OPPORTUNITE);
   }
   if (f.proprietaire) {
@@ -750,6 +755,8 @@ const COLONNES_PATCH: Record<string, string> = {
 };
 
 export interface OptionsMaj {
+  /** Exclusivement pour les routes authentifiées du dashboard. */
+  manuelle?: boolean;
   /** Marque le lead comme synchronisé avec Notion à cet instant. */
   notionLastSyncedAt?: string;
   /** N'incrémente pas `updated_at` (utile pour un `pull` Notion). */
@@ -760,13 +767,28 @@ export async function mettreAJourLead(
   id: string,
   patch: Partial<LeadParsed>,
   options: OptionsMaj = {},
+  tentative = 0,
 ): Promise<Lead | null> {
   const db = await getDb();
   const actuel = await lireLead(id);
   if (!actuel) return null;
 
+  const champsManuels = new Set(actuel.manualFields ?? []);
+  if (!options.manuelle) {
+    patch = Object.fromEntries(Object.entries(patch).filter(([cle]) => !champsManuels.has(cle))) as Partial<LeadParsed>;
+    if (!Object.values(patch).some((valeur) => valeur !== undefined)) return actuel;
+  }
+
   const assignations: string[] = [];
   const params: unknown[] = [];
+
+  if (options.manuelle) {
+    for (const cle of [...Object.keys(COLONNES_PATCH), 'tags']) {
+      if (patch[cle as keyof LeadParsed] !== undefined) champsManuels.add(cle);
+    }
+    assignations.push('manual_fields = ?');
+    params.push(JSON.stringify([...champsManuels]));
+  }
 
   for (const [cle, colonne] of Object.entries(COLONNES_PATCH)) {
     if (!(cle in patch)) continue;
@@ -836,10 +858,15 @@ export async function mettreAJourLead(
     params.push(options.notionLastSyncedAt);
   }
   assignations.push('updated_at = ?');
-  params.push(options.conserverUpdatedAt ? actuel.updatedAt : maintenantIso());
+  params.push(options.conserverUpdatedAt ? actuel.updatedAt :
+    new Date(Math.max(Date.now(), Date.parse(actuel.updatedAt) + 1)).toISOString());
 
-  params.push(id);
-  await db.run(`UPDATE leads SET ${assignations.join(', ')} WHERE id = ?`, params);
+  params.push(id, actuel.updatedAt);
+  const resultat = await db.run(`UPDATE leads SET ${assignations.join(', ')} WHERE id = ? AND updated_at = ? AND deleted_at IS NULL`, params);
+  if (resultat.changes === 0) {
+    if (tentative >= 2) throw new Error('Modification concurrente : réessayez l’enregistrement.');
+    return mettreAJourLead(id, patch, options, tentative + 1);
+  }
   return lireLead(id);
 }
 

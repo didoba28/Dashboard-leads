@@ -58,6 +58,34 @@ function definirTests(): void {
     await viderBase();
   });
 
+  it('conserve les champs manuels même contre une mise à jour Notion ou automatique plus récente', async () => {
+    const { lead } = await creerLead(entreeLead({ sourceCollecte: 'slack_inbound' }));
+    await mettreAJourLead(lead.id, {
+      relation: 'client', statut: 'qualifie', typeActivation: 'reactivation', dateActivation: '2026-10-21',
+      email: null, tags: ['Choix humain'],
+    }, { manuelle: true });
+    const maj = await mettreAJourLead(lead.id, {
+      relation: 'prospect', statut: 'nouveau', typeActivation: null, dateActivation: null,
+      email: 'automate@exemple.fr', tags: [], proprietaire: 'Sales ajouté par Notion',
+    });
+    expect(maj).toMatchObject({ relation: 'client', statut: 'qualifie', typeActivation: 'reactivation',
+      dateActivation: '2026-10-21', email: null, tags: ['Choix humain'], proprietaire: 'Sales ajouté par Notion' });
+    expect(maj?.manualFields).toContain('email');
+    expect(maj?.points).toBe(0);
+    await confirmerPointsLead(lead.id, 'humain');
+    expect((await listerLeads({ periodeActivation: '2026-Q4', opportunitesInbound: true })).leads.map(l => l.id)).toEqual([lead.id]);
+    const seconde = await mettreAJourLead(lead.id, { dateActivation: '2026-10-23', typeActivation: null }, { manuelle: true });
+    expect(seconde?.dateActivation).toBe('2026-10-23');
+    expect((await listerLeads({ opportunitesInbound: true })).total).toBe(0);
+  });
+
+  it('la maintenance ne reclasse plus un segment choisi manuellement', async () => {
+    const { lead } = await creerLead(entreeLead({ sourceCollecte: 'slack_inbound' }));
+    await mettreAJourLead(lead.id, { segment: 'b2c' }, { manuelle: true });
+    await retraiterAutomatisationHistorique();
+    expect((await lireLead(lead.id))?.segment).toBe('b2c');
+  });
+
   it('applique le scoring à la création et le persiste (points, éligibilité, règle)', async () => {
     const { lead, doublon } = await creerLead(entreeLead());
     expect(doublon).toBe(false);

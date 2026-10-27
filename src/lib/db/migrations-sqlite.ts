@@ -103,4 +103,10 @@ export const MIGRATIONS_SQLITE: Migration[] = [
         WHERE dedupe_key IS NOT NULL AND deleted_at IS NULL;
     `,
   },
+  {
+    nom: '004_manual_fields',
+    sql: `ALTER TABLE leads ADD COLUMN manual_fields TEXT NOT NULL DEFAULT '[]';
+      UPDATE leads SET manual_fields = '["typeActivation","dateActivation","statut","relation"]'
+      WHERE source_collecte <> 'notion' AND type_activation IS NOT NULL AND date_activation IS NOT NULL;`,
+  },
 ];
