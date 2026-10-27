@@ -278,6 +278,7 @@ export function FormulaireLead({
         ) : null}
         <AperçuScore
           score={score}
+          activationManuelle={v.typeActivation !== '' && estDateSimpleValide(v.dateActivation) ? v.typeActivation : null}
           pointsForces={v.pointsOverride === '' ? null : Number(v.pointsOverride)}
           enAttente={Boolean(lead?.validationRequise && (!lead.pointsConfirmes || scoreModifie))}
         />

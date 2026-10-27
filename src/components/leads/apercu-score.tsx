@@ -9,10 +9,12 @@ export function AperçuScore({
   score,
   pointsForces,
   enAttente = false,
+  activationManuelle,
 }: {
   score: ResultatScoring;
   pointsForces?: number | null;
   enAttente?: boolean;
+  activationManuelle?: 'activation' | 'reactivation' | null;
 }) {
   const effectifs = pointsForces ?? score.points;
   const force = pointsForces != null && pointsForces !== score.points;
@@ -35,8 +37,9 @@ export function AperçuScore({
           <Badge ton={score.eligible ? 'bon' : 'critique'} icone={<span aria-hidden>{score.eligible ? '✓' : '✕'}</span>}>
             {score.eligible ? 'Lead entrant' : 'Non comptabilisé'}
           </Badge>
-          <Badge ton={score.eligibleActivation ? 'info' : 'neutre'}>
-            {score.eligibleActivation ? 'Compte en activation' : 'Hors activation inbound'}
+          <Badge ton={activationManuelle || score.eligibleActivation ? 'info' : 'neutre'}>
+            {activationManuelle ? (activationManuelle === 'reactivation' ? 'Réactivation manuelle' : 'Activation manuelle') :
+              score.eligibleActivation ? 'Éligible à une activation' : 'Non éligible automatiquement'}
           </Badge>
           {force ? <Badge ton="attention">Arbitrage manuel</Badge> : null}
         </div>
@@ -44,6 +47,7 @@ export function AperçuScore({
       <p className="mt-2 border-t border-hair pt-2 text-xs text-ink-2">
         <strong className="font-medium text-ink">{score.regleLabel}</strong> — {score.explication}
       </p>
+      {activationManuelle ? <p className="mt-1 text-xs text-ink-2">Votre décision datée prime sur le classement automatique pour les opportunités après enregistrement et confirmation. Les points de nouveau lead restent calculés séparément.</p> : null}
       {enAttente ? (
         <p className="mt-1 text-xs font-medium text-[var(--warning)]">
           Ces points ne comptent pas dans le dashboard avant votre confirmation.
