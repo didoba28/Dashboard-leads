@@ -1,6 +1,8 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import Image from 'next/image';
+import Link from 'next/link';
 import { Navigation } from '@/components/navigation';
 import { BasculeTheme } from '@/components/ui/theme';
 
@@ -13,18 +15,15 @@ export function CadreApplication({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col justify-between border-r border-hair bg-surface px-3 py-4 lg:flex">
         <div>
-          <div className="mb-6 px-2.5">
-            <p className="text-[13px] font-semibold tracking-tight text-ink">Leads entrants</p>
-            <p className="text-[11px] text-ink-muted">Pôle Growth</p>
-          </div>
+          <LienAirFit className="mb-6 mx-2.5" />
           <Navigation />
         </div>
         <div className="px-2.5"><BasculeTheme /></div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 border-b border-hair bg-surface/85 px-4 py-2 backdrop-blur lg:hidden">
+        <header className="sticky top-0 z-20 border-b border-hair bg-surface px-4 py-2 lg:hidden">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[13px] font-semibold text-ink">Leads entrants</p>
+            <LienAirFit />
             <BasculeTheme />
           </div>
           <div className="mt-2 flex gap-1 overflow-x-auto pb-1"><Navigation orientation="horizontale" /></div>
@@ -32,5 +31,16 @@ export function CadreApplication({ children }: { children: React.ReactNode }) {
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</main>
       </div>
     </div>
+  );
+}
+
+function LienAirFit({ className = '' }: { className?: string }) {
+  return (
+    <Link href="/" aria-label="AirFit — Vue d’ensemble" className={`flex w-fit items-center gap-2 rounded-md ${className}`}>
+      <span className="rounded-md bg-white px-2 py-1.5">
+        <Image src="/airfit-logo.svg" alt="AirFit" width={83} height={19} unoptimized />
+      </span>
+      <span className="text-xs font-medium text-ink-muted">Leads</span>
+    </Link>
   );
 }

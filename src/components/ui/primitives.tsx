@@ -46,7 +46,7 @@ type VarianteBouton = 'principal' | 'secondaire' | 'discret' | 'danger';
 
 const BOUTONS: Record<VarianteBouton, string> = {
   principal:
-    'bg-[var(--s1)] text-white hover:brightness-110 active:brightness-95 border-transparent',
+    'bg-[var(--action)] text-white hover:bg-[var(--action-hover)] active:brightness-95 border-transparent',
   secondaire:
     'bg-surface text-ink border-hair-fort hover:bg-surface-2',
   discret: 'bg-transparent text-ink-2 border-transparent hover:bg-surface-2 hover:text-ink',

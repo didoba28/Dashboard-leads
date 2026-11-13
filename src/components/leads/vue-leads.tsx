@@ -491,7 +491,7 @@ export function VueLeads({
         <nav aria-label="Vues rapides des leads" className="flex flex-wrap gap-1 rounded-lg border border-hair bg-surface p-1">
           {VUES_RAPIDES.map((vue) => (
             <button key={vue.id} type="button" onClick={() => choisirVue(vue.id)} aria-pressed={vueRapide === vue.id}
-              className={clsx('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', vueRapide === vue.id ? 'bg-[var(--s1)] text-white' : 'text-ink-2 hover:bg-surface-2')}>
+              className={clsx('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', vueRapide === vue.id ? 'bg-[var(--action)] text-white' : 'text-ink-2 hover:bg-surface-2')}>
               {vue.label}
             </button>
           ))}

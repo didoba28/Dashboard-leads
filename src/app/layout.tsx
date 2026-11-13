@@ -5,15 +5,15 @@ import { FournisseurToasts } from '@/components/ui/toast';
 import { CadreApplication } from '@/components/cadre-application';
 
 export const metadata: Metadata = {
-  title: 'Leads entrants — Growth',
+  title: 'AirFit — Suivi des leads',
   description:
     'Suivi centralisé des leads entrants : comptage en points, objectifs trimestriels, primes et synchronisation Notion.',
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f9f9f7' },
-    { media: '(prefers-color-scheme: dark)', color: '#0d0d0d' },
+    { media: '(prefers-color-scheme: light)', color: '#f3f7fa' },
+    { media: '(prefers-color-scheme: dark)', color: '#0c1722' },
   ],
 };
 

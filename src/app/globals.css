@@ -9,21 +9,24 @@
 :root {
   color-scheme: light;
 
-  --plan: #f9f9f7;
-  --surface: #fcfcfb;
-  --surface-2: #f3f2ee;
-  --surface-3: #eceae4;
+  --plan: #f3f7fa;
+  --surface: #ffffff;
+  --surface-2: #edf4f9;
+  --surface-3: #e0eef9;
 
-  --ink: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-muted: #898781;
+  --ink: #14283a;
+  --ink-2: #344b60;
+  --ink-muted: #536779;
 
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
-  --hair: rgba(11, 11, 11, 0.1);
-  --hair-fort: rgba(11, 11, 11, 0.16);
+  --grid: #dce7ef;
+  --axis: #8299ad;
+  --hair: rgba(20, 40, 58, 0.13);
+  --hair-fort: rgba(20, 40, 58, 0.23);
 
-  --s1: #2a78d6;
+  /* Bleu de marque et turquoise du logo AirFit. */
+  --action: #01549d;
+  --action-hover: #00457f;
+  --s1: #01549d;
   --s2: #eb6834;
   --s3: #1baf7a;
   --s4: #eda100;
@@ -35,7 +38,7 @@
   --seq-100: #cde2fb;
   --seq-250: #86b6ef;
   --seq-350: #5598e7;
-  --seq-450: #2a78d6;
+  --seq-450: #01549d;
   --seq-550: #1c5cab;
   --seq-650: #104281;
 
@@ -45,67 +48,29 @@
   --serious: #ec835a;
   --critical: #d03b3b;
 
-  --ombre-carte: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 1px rgba(11, 11, 11, 0.03);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-
-    --plan: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-2: #232321;
-    --surface-3: #2c2c2a;
-
-    --ink: #ffffff;
-    --ink-2: #c3c2b7;
-    --ink-muted: #898781;
-
-    --grid: #2c2c2a;
-    --axis: #383835;
-    --hair: rgba(255, 255, 255, 0.1);
-    --hair-fort: rgba(255, 255, 255, 0.16);
-
-    --s1: #3987e5;
-    --s2: #d95926;
-    --s3: #199e70;
-    --s4: #c98500;
-    --s5: #d55181;
-    --s6: #008300;
-    --s7: #9085e9;
-    --s8: #e66767;
-
-    --seq-100: #184f95;
-    --seq-250: #1c5cab;
-    --seq-350: #256abf;
-    --seq-450: #3987e5;
-    --seq-550: #5598e7;
-    --seq-650: #86b6ef;
-
-    --good-texte: #0ca30c;
-
-    --ombre-carte: 0 1px 2px rgba(0, 0, 0, 0.4);
-  }
+  --ombre-carte: none;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --plan: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-2: #232321;
-  --surface-3: #2c2c2a;
+  --plan: #0c1722;
+  --surface: #132231;
+  --surface-2: #1b3041;
+  --surface-3: #233b50;
 
   --ink: #ffffff;
-  --ink-2: #c3c2b7;
-  --ink-muted: #898781;
+  --ink-2: #c5d8e7;
+  --ink-muted: #a1b6c8;
 
-  --grid: #2c2c2a;
-  --axis: #383835;
+  --grid: #294257;
+  --axis: #58758d;
   --hair: rgba(255, 255, 255, 0.1);
   --hair-fort: rgba(255, 255, 255, 0.16);
 
-  --s1: #3987e5;
+  --s1: #71c9f4;
+  --action: #01549d;
+  --action-hover: #0969b5;
   --s2: #d95926;
   --s3: #199e70;
   --s4: #c98500;
@@ -121,13 +86,57 @@
   --seq-550: #5598e7;
   --seq-650: #86b6ef;
 
-  --good-texte: #0ca30c;
+  --good-texte: #71e18e;
+  --critical: #ff9393;
 
-  --ombre-carte: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ombre-carte: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --plan: #0c1722;
+    --surface: #132231;
+    --surface-2: #1b3041;
+    --surface-3: #233b50;
+
+    --ink: #ffffff;
+    --ink-2: #c5d8e7;
+    --ink-muted: #a1b6c8;
+
+    --grid: #294257;
+    --axis: #58758d;
+    --hair: rgba(255, 255, 255, 0.1);
+    --hair-fort: rgba(255, 255, 255, 0.16);
+
+    --s1: #71c9f4;
+    --action: #01549d;
+    --action-hover: #0969b5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s4: #c98500;
+    --s5: #d55181;
+    --s6: #008300;
+    --s7: #9085e9;
+    --s8: #e66767;
+
+    --seq-100: #184f95;
+    --seq-250: #1c5cab;
+    --seq-350: #256abf;
+    --seq-450: #3987e5;
+    --seq-550: #5598e7;
+    --seq-650: #86b6ef;
+
+    --good-texte: #71e18e;
+    --critical: #ff9393;
+
+    --ombre-carte: none;
+  }
 }
 
 @theme inline {
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
   --color-plan: var(--plan);
   --color-surface: var(--surface);

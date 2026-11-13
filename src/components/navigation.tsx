@@ -31,7 +31,7 @@ export function Navigation({ orientation = 'verticale' }: { orientation?: 'verti
             className={clsx(
               'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] whitespace-nowrap transition-colors',
               actif
-                ? 'bg-surface-3 font-medium text-ink'
+                ? 'bg-surface-3 font-semibold text-s1'
                 : 'text-ink-2 hover:bg-surface-2 hover:text-ink',
             )}
           >
